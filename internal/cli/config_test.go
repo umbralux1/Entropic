@@ -163,6 +163,26 @@ func TestTestFilesAreReportedSeparatelyFromProductionCode(t *testing.T) {
 	}
 }
 
+func TestTextShowsTestsAfterProductionCode(t *testing.T) {
+	repo := testrepo.New(t).
+		Write("calc/calc.go", calcGo).
+		Write("calc/calc_test.go", calcTestGo).
+		Commit("add calc with tests")
+
+	out := repo.Run("--base", "none", "--format", "text").Text(0)
+
+	heading := strings.Index(out, "Tests")
+	if heading < 0 {
+		t.Fatalf("text report lacks a Tests section:\n%s", out)
+	}
+	if i := strings.Index(out, "SumPositive"); i < 0 || i > heading {
+		t.Errorf("want production Units before the Tests section:\n%s", out)
+	}
+	if i := strings.Index(out, "TestSign"); i < heading {
+		t.Errorf("want TestSign under the Tests section:\n%s", out)
+	}
+}
+
 func TestEditingOnlyTestsLeavesProductionDeltaAtZero(t *testing.T) {
 	repo := testrepo.New(t).
 		Write("calc/calc.go", calcGo).
