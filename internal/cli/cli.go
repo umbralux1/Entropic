@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/umbralux1/entropic/internal/config"
 	"github.com/umbralux1/entropic/internal/language"
@@ -49,6 +50,9 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 		return ExitError
 	}
 	r, err := measure(dir, *base, cfg)
+	if err == nil {
+		r, err = withHotspots(dir, r, defaultChurnWindowDays, signalWeights(cfg))
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
 		return ExitError
@@ -60,14 +64,24 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
+// defaultChurnWindowDays is how far back Churn looks when nothing else says.
+// Ticket #8 makes it configurable; pass the configured value to withHotspots.
+const defaultChurnWindowDays = 90
+
+// withHotspots counts Churn over the last windowDays and ranks r's Hotspots.
+func withHotspots(dir string, r scoring.Report, windowDays int, weights map[scoring.Signal]float64) (scoring.Report, error) {
+	churn, err := revisions.Churn(dir, time.Now().AddDate(0, 0, -windowDays))
+	if err != nil {
+		return scoring.Report{}, err
+	}
+	return r.WithHotspots(churn, windowDays, weights), nil
+}
+
 // measure measures the working tree and, unless base is none, compares it
 // against the Baseline. Both are measured with the current config, so the
 // Delta reflects the code alone.
 func measure(dir, base string, cfg config.Config) (scoring.Report, error) {
-	weights := map[scoring.Signal]float64{}
-	for name, w := range cfg.Weights {
-		weights[scoring.Signal(name)] = w
-	}
+	weights := signalWeights(cfg)
 	inScope := func(path string) bool {
 		lang, ok := language.ForPath(path)
 		return ok && !lang.Vendored(path) && !cfg.Excluded(path)
@@ -96,6 +110,15 @@ func measure(dir, base string, cfg config.Config) (scoring.Report, error) {
 	r := scoring.Compare(current, before)
 	r.Baseline = &scoring.Baseline{Ref: baseline.Ref, Commit: baseline.Commit}
 	return r, nil
+}
+
+// signalWeights is cfg's Signal weights keyed by Signal.
+func signalWeights(cfg config.Config) map[scoring.Signal]float64 {
+	weights := map[scoring.Signal]float64{}
+	for name, w := range cfg.Weights {
+		weights[scoring.Signal(name)] = w
+	}
+	return weights
 }
 
 // sourceFiles pairs each file with its language, leaving out generated code.

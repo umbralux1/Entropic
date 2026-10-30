@@ -33,6 +33,10 @@ type Report struct {
 	Baseline *Baseline `json:"baseline"`
 	Group
 	Tests Group `json:"tests"`
+	// ChurnWindowDays is the history window Hotspot Churn was counted over.
+	ChurnWindowDays int `json:"churnWindowDays"`
+	// Hotspots rank production file Units by entropy times Churn.
+	Hotspots []Hotspot `json:"hotspots"`
 }
 
 // Group is the measurement of one group of files, rolled up to its own
