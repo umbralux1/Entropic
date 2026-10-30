@@ -117,6 +117,13 @@ type ReportUnit struct {
 	Complexity int         `json:"complexity"`
 	Status     string      `json:"status"`
 	Delta      ReportDelta `json:"delta"`
+	// Informational values are reported but feed no Signal or Entropy Score.
+	Informational ReportInformational `json:"informational"`
+}
+
+// ReportInformational holds a function Unit's informational values.
+type ReportInformational struct {
+	Cyclomatic int `json:"cyclomatic"`
 }
 
 // Unit returns the Unit of the given kind and name, failing the test if

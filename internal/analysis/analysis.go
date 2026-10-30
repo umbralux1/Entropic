@@ -25,6 +25,9 @@ type Unit struct {
 	StartLine  int
 	EndLine    int
 	Complexity int
+	// Cyclomatic is McCabe's cyclomatic complexity: informational only, it
+	// feeds no Signal or Entropy Score.
+	Cyclomatic int
 }
 
 // Language describes how to read one programming language: its grammar and
@@ -34,11 +37,14 @@ type Language struct {
 	Grammar *sitter.Language
 	// Extensions are the file extensions, with leading dot, written in this language.
 	Extensions []string
-	// Functions are node kinds that form a function Unit; their "name" field names it.
+	// Functions are node kinds that form a function Unit.
 	Functions map[string]bool
-	// Branches are node kinds that break linear flow: each adds 1 plus the
-	// current nesting depth to Complexity, and nests what is inside it.
-	Branches map[string]bool
+	// UnitName names the function Unit formed by fn.
+	UnitName func(fn *sitter.Node, source []byte) string
+	// Complexity scores the function Unit formed by fn.
+	Complexity func(fn *sitter.Node, source []byte) int
+	// Cyclomatic counts the independent paths through fn.
+	Cyclomatic func(fn *sitter.Node) int
 }
 
 // Analyze parses source in the given language and returns its function Units
@@ -56,16 +62,13 @@ func Analyze(source []byte, lang Language) ([]Unit, error) {
 	var visit func(n *sitter.Node)
 	visit = func(n *sitter.Node) {
 		if lang.Functions[n.Kind()] {
-			name := ""
-			if id := n.ChildByFieldName("name"); id != nil {
-				name = id.Utf8Text(source)
-			}
 			units = append(units, Unit{
 				Kind:       Function,
-				Name:       name,
+				Name:       lang.UnitName(n, source),
 				StartLine:  int(n.StartPosition().Row) + 1,
 				EndLine:    int(n.EndPosition().Row) + 1,
-				Complexity: complexity(n, lang, 0),
+				Complexity: lang.Complexity(n, source),
+				Cyclomatic: lang.Cyclomatic(n),
 			})
 		}
 		for i := uint(0); i < n.ChildCount(); i++ {
@@ -74,17 +77,4 @@ func Analyze(source []byte, lang Language) ([]Unit, error) {
 	}
 	visit(tree.RootNode())
 	return units, nil
-}
-
-func complexity(n *sitter.Node, lang Language, nesting int) int {
-	total := 0
-	for i := uint(0); i < n.ChildCount(); i++ {
-		child := n.Child(i)
-		if lang.Branches[child.Kind()] {
-			total += 1 + nesting + complexity(child, lang, nesting+1)
-		} else {
-			total += complexity(child, lang, nesting)
-		}
-	}
-	return total
 }

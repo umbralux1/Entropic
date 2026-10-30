@@ -62,6 +62,14 @@ type Unit struct {
 	Complexity int               `json:"complexity"`
 	Status     Status            `json:"status,omitempty"`
 	Delta      *UnitDelta        `json:"delta,omitempty"`
+	// Informational values are reported on functions but feed no Signal,
+	// Entropy Score or Delta, and do not roll up.
+	Informational *Informational `json:"informational,omitempty"`
+}
+
+// Informational holds a function Unit's informational values.
+type Informational struct {
+	Cyclomatic int `json:"cyclomatic"`
 }
 
 const schemaVersion = 1
@@ -86,8 +94,9 @@ func Measure(files []SourceFile) (Report, error) {
 			functions = append(functions, Unit{
 				Kind: u.Kind, Name: u.Name, Path: f.Path, Module: module,
 				StartLine: u.StartLine, EndLine: u.EndLine,
-				Lines:      nonBlank(lines[u.StartLine-1 : u.EndLine]),
-				Complexity: u.Complexity,
+				Lines:         nonBlank(lines[u.StartLine-1 : u.EndLine]),
+				Complexity:    u.Complexity,
+				Informational: &Informational{Cyclomatic: u.Cyclomatic},
 			})
 			file.Complexity += u.Complexity
 		}
