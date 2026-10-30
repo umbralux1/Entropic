@@ -97,7 +97,7 @@ func measure(dir, base string, cfg config.Config) (scoring.Report, error) {
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	current, err := scoring.Measure(sourceFiles(nowFiles), weights)
+	current, err := scoring.Measure(sourceFiles(nowFiles), weights, cfg.DuplicateMinLines)
 	if err != nil || baseline == nil {
 		return current, err
 	}
@@ -106,7 +106,7 @@ func measure(dir, base string, cfg config.Config) (scoring.Report, error) {
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	before, err := scoring.Measure(sourceFiles(baseFiles), weights)
+	before, err := scoring.Measure(sourceFiles(baseFiles), weights, cfg.DuplicateMinLines)
 	if err != nil {
 		return scoring.Report{}, fmt.Errorf("at Baseline %s: %w", baseline.Ref, err)
 	}

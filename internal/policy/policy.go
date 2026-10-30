@@ -39,7 +39,7 @@ func complexity(units []scoring.Unit, limit float64) (scoring.Violation, bool) {
 	return scoring.Violation{
 		Threshold: scoring.ComplexityThreshold,
 		Limit:     limit,
-		Value:     float64(over[0].Delta.Complexity),
+		Value:     float64(over[0].Delta.Values[scoring.Complexity]),
 		Units:     refs(over),
 	}, true
 }
@@ -90,11 +90,13 @@ func entropyScore(g scoring.Group, limit float64) (scoring.Violation, bool) {
 func gainers(units []scoring.Unit, limit float64) []scoring.Unit {
 	var out []scoring.Unit
 	for _, u := range units {
-		if u.Kind == analysis.Function && float64(u.Delta.Complexity) > limit {
+		if u.Kind == analysis.Function && float64(u.Delta.Values[scoring.Complexity]) > limit {
 			out = append(out, u)
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Delta.Complexity > out[j].Delta.Complexity })
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Delta.Values[scoring.Complexity] > out[j].Delta.Values[scoring.Complexity]
+	})
 	return out
 }
 

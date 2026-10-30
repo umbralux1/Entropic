@@ -25,6 +25,20 @@ func TestTextSnapshotShowsScoreSignalsAndUnitLocations(t *testing.T) {
 	}
 }
 
+func TestTextListsFunctionsBeforeTheirClasses(t *testing.T) {
+	repo := testrepo.New(t).Write("cart.py", `class Cart:
+    def total(self, items):
+        return sum(items)
+`).Commit("add cart")
+
+	out := repo.Run("--base", "none", "--format", "text").Text(0)
+
+	method, class := strings.Index(out, "function "), strings.Index(out, "class ")
+	if method < 0 || class < 0 || class < method {
+		t.Errorf("want function Cart.total listed before class Cart:\n%s", out)
+	}
+}
+
 func TestTextListsUnitsWithLargestDeltaFirst(t *testing.T) {
 	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc").
 		Write("calc/calc.go", signNested). // Sign: Complexity 1 -> 3, Delta +2

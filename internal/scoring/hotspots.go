@@ -43,5 +43,5 @@ func (r Report) WithHotspots(churn map[string]int, windowDays int, weights map[S
 
 // entropy is a Unit's weighted Signal total, weighted as in the Entropy Score.
 func entropy(u Unit, weights map[Signal]float64) float64 {
-	return weights[Complexity] * float64(u.Complexity)
+	return u.Values.Weighted(weights)
 }

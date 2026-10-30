@@ -138,11 +138,25 @@ func (rep Report) Violation(t *testing.T, threshold string) ReportViolation {
 	return ReportViolation{}
 }
 
-// ReportGroup is the Entropy Score, Signals and Units of one group of files.
+// ReportGroup is the Entropy Score, Signals, Units and clone groups of one
+// group of files.
 type ReportGroup struct {
 	EntropyScore ReportFigure            `json:"entropyScore"`
 	Signals      map[string]ReportFigure `json:"signals"`
 	Units        []ReportUnit            `json:"units"`
+	CloneGroups  []ReportCloneGroup      `json:"cloneGroups"`
+}
+
+// ReportCloneGroup is a set of structurally identical code fragments.
+type ReportCloneGroup struct {
+	Locations []ReportLocation `json:"locations"`
+}
+
+// ReportLocation is a line range in a file.
+type ReportLocation struct {
+	Path      string `json:"path"`
+	StartLine int    `json:"startLine"`
+	EndLine   int    `json:"endLine"`
 }
 
 // ReportHotspot is a file Unit ranked by entropy times Churn.
@@ -178,8 +192,9 @@ type ReportBaseline struct {
 
 // ReportDelta is a Unit's change against the Baseline.
 type ReportDelta struct {
-	Lines      int `json:"lines"`
-	Complexity int `json:"complexity"`
+	Lines       int `json:"lines"`
+	Complexity  int `json:"complexity"`
+	Duplication int `json:"duplication"`
 }
 
 // ReportFigure is a repository-wide number (a Signal or the Entropy Score) and its Delta.
@@ -190,16 +205,18 @@ type ReportFigure struct {
 
 // ReportUnit is one Unit in the JSON report.
 type ReportUnit struct {
-	Kind       string      `json:"kind"`
-	Name       string      `json:"name"`
-	Path       string      `json:"path"`
-	Module     string      `json:"module"`
-	StartLine  int         `json:"startLine"`
-	EndLine    int         `json:"endLine"`
-	Lines      int         `json:"lines"`
-	Complexity int         `json:"complexity"`
-	Status     string      `json:"status"`
-	Delta      ReportDelta `json:"delta"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	Module     string `json:"module"`
+	StartLine  int    `json:"startLine"`
+	EndLine    int    `json:"endLine"`
+	Lines      int    `json:"lines"`
+	Complexity int    `json:"complexity"`
+	// Duplication is the number of non-blank lines inside clones.
+	Duplication int         `json:"duplication"`
+	Status      string      `json:"status"`
+	Delta       ReportDelta `json:"delta"`
 	// Informational values are reported but feed no Signal or Entropy Score.
 	Informational ReportInformational `json:"informational"`
 }

@@ -6,9 +6,10 @@ import (
 
 	"github.com/umbralux1/entropic/internal/analysis"
 	"github.com/umbralux1/entropic/internal/language/golang"
+	"github.com/umbralux1/entropic/internal/language/python"
 )
 
-var all = []analysis.Language{golang.Language}
+var all = []analysis.Language{golang.Language, python.Language}
 
 // ForPath returns the language a file is written in, judged by its extension.
 func ForPath(path string) (analysis.Language, bool) {

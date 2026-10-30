@@ -17,6 +17,7 @@ type UnitKind string
 // Unit kinds, from finest to coarsest.
 const (
 	Function   UnitKind = "function"
+	Class      UnitKind = "class"
 	File       UnitKind = "file"
 	Module     UnitKind = "module"
 	Repository UnitKind = "repository"
@@ -43,8 +44,11 @@ type Language struct {
 	Extensions []string
 	// Functions are node kinds that form a function Unit.
 	Functions map[string]bool
-	// UnitName names the function Unit formed by fn.
-	UnitName func(fn *sitter.Node, source []byte) string
+	// Classes are node kinds that form a class Unit, whose Complexity rolls
+	// up the functions it encloses.
+	Classes map[string]bool
+	// UnitName names the function or class Unit formed by n.
+	UnitName func(n *sitter.Node, source []byte) string
 	// Complexity scores the function Unit formed by fn.
 	Complexity func(fn *sitter.Node, source []byte) int
 	// Cyclomatic counts the independent paths through fn.
@@ -56,6 +60,12 @@ type Language struct {
 	TestPaths []string
 	// Generated matches source marked as generated, which is not measured.
 	Generated *regexp.Regexp
+	// Abstracted are node kinds, identifiers and literals, whose text
+	// Duplication ignores, so that renamed copies still count as clones.
+	Abstracted map[string]bool
+	// Unduplicable are node kinds, such as imports and comments, that
+	// Duplication skips: they neither form a clone nor tell two clones apart.
+	Unduplicable map[string]bool
 }
 
 // IsTest reports whether a slash-separated path holds test code.
@@ -86,8 +96,8 @@ func (l Language) Vendored(path string) bool {
 	return false
 }
 
-// Analyze parses source in the given language and returns its function Units
-// in source order.
+// Analyze parses source in the given language and returns its function and
+// class Units in source order.
 func Analyze(source []byte, lang Language) ([]Unit, error) {
 	parser := sitter.NewParser()
 	defer parser.Close()
@@ -101,21 +111,31 @@ func Analyze(source []byte, lang Language) ([]Unit, error) {
 	}
 
 	var units []Unit
-	var visit func(n *sitter.Node)
-	visit = func(n *sitter.Node) {
-		if lang.Functions[n.Kind()] {
-			units = append(units, Unit{
-				Kind:       Function,
-				Name:       lang.UnitName(n, source),
-				StartLine:  int(n.StartPosition().Row) + 1,
-				EndLine:    int(n.EndPosition().Row) + 1,
-				Complexity: lang.Complexity(n, source),
-				Cyclomatic: lang.Cyclomatic(n),
-			})
+	// visit appends the Units n forms and contains, and returns the
+	// Complexity of the functions among them.
+	var visit func(n *sitter.Node) int
+	visit = func(n *sitter.Node) int {
+		unit := Unit{
+			StartLine: int(n.StartPosition().Row) + 1,
+			EndLine:   int(n.EndPosition().Row) + 1,
 		}
-		for i := uint(0); i < n.ChildCount(); i++ {
-			visit(n.Child(i))
+		switch {
+		case lang.Functions[n.Kind()]:
+			unit.Kind = Function
+			unit.Name = lang.UnitName(n, source)
+			unit.Complexity = lang.Complexity(n, source)
+			unit.Cyclomatic = lang.Cyclomatic(n)
+			units = append(units, unit)
+			return unit.Complexity // a nested function is part of the function it is in
+		case lang.Classes[n.Kind()]:
+			unit.Kind = Class
+			unit.Name = lang.UnitName(n, source)
+			i := len(units)
+			units = append(units, unit)
+			units[i].Complexity = visitChildren(n, visit)
+			return units[i].Complexity
 		}
+		return visitChildren(n, visit)
 	}
 	visit(tree.RootNode())
 	return units, nil
@@ -133,4 +153,12 @@ func firstError(n *sitter.Node) *sitter.Node {
 		}
 	}
 	return n
+}
+
+func visitChildren(n *sitter.Node, visit func(*sitter.Node) int) int {
+	total := 0
+	for i := uint(0); i < n.ChildCount(); i++ {
+		total += visit(n.Child(i))
+	}
+	return total
 }
