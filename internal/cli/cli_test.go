@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/umbralux1/entropic/internal/testrepo"
@@ -15,14 +16,140 @@ func TestSnapshotIgnoresFilesDeletedFromWorkingTree(t *testing.T) {
 
 	r := repo.Run("--base", "none", "--format", "json").Report(0)
 
-	if len(r.Units) != 1 || r.Units[0].Name != "A" {
-		t.Errorf("want only unit A, got %+v", r.Units)
+	if fns := r.UnitsOfKind("function"); len(fns) != 1 || fns[0].Name != "A" {
+		t.Errorf("want only function A, got %+v", fns)
 	}
 }
 
-func TestSnapshotReportsGoFunctionComplexityAsJSON(t *testing.T) {
+func TestUnitValuesRollUpToFileModuleAndRepository(t *testing.T) {
 	repo := testrepo.New(t).
-		Write("calc/calc.go", `package calc
+		Write("calc/calc.go", calcGo). // Sign 1 + SumPositive 3; 16 non-blank lines
+		Write("calc/abs.go", `package calc
+
+func Abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+`). // Abs 1; 7 non-blank lines
+		Write("main.go", `package main
+
+func main() {
+	for {
+	}
+}
+`). // main 1; 5 non-blank lines
+		Commit("add code")
+
+	r := repo.Run("--base", "none", "--format", "json").Report(0)
+
+	cases := []struct {
+		kind, name       string
+		complexity, size int
+	}{
+		{"file", "calc/abs.go", 1, 7},
+		{"file", "calc/calc.go", 4, 16},
+		{"file", "main.go", 1, 5},
+		{"module", "calc", 5, 23},
+		{"module", ".", 1, 5},
+		{"repository", "", 6, 28},
+	}
+	for _, c := range cases {
+		u := r.Unit(t, c.kind, c.name)
+		if u.Complexity != c.complexity || u.Lines != c.size {
+			t.Errorf("%s %q: want complexity %d, lines %d; got complexity %d, lines %d",
+				c.kind, c.name, c.complexity, c.size, u.Complexity, u.Lines)
+		}
+	}
+	if f := r.Unit(t, "file", "calc/abs.go"); f.Module != "calc" || f.StartLine != 1 || f.EndLine != 8 {
+		t.Errorf("calc/abs.go: want module calc, lines 1-8; got %+v", f)
+	}
+}
+
+func TestSignalSummaryMatchesRepositoryUnit(t *testing.T) {
+	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc")
+
+	r := repo.Run("--base", "none", "--format", "json").Report(0)
+
+	if got := r.Signals["complexity"].Value; got != 4 {
+		t.Errorf("complexity Signal: want 4, got %v", got)
+	}
+	// Entropy Score is a density: Complexity 4 per 16 non-blank lines = 25 per 100 lines.
+	if r.EntropyScore != 25 {
+		t.Errorf("entropyScore: want 25, got %v", r.EntropyScore)
+	}
+}
+
+func TestEntropyScoreIsNotRounded(t *testing.T) {
+	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Write("calc/zero.go", `package calc
+
+func Zero() int {
+	z := 0
+	return z
+}
+`).Commit("add calc")
+
+	r := repo.Run("--base", "none", "--format", "json").Report(0)
+
+	// Complexity 4 per 16+5 = 21 non-blank lines = 19.047619... per 100 lines;
+	// a rounded score would hide small Deltas in large repositories.
+	if want := 400.0 / 21; math.Abs(r.EntropyScore-want) > 1e-9 {
+		t.Errorf("entropyScore: want %v, got %v", want, r.EntropyScore)
+	}
+}
+
+// Entropy Score is a density, so adding code with Complexity 0 lowers it,
+// while adding code denser than the repository average raises it.
+func TestAddingFlatCodeDoesNotRaiseEntropyScore(t *testing.T) {
+	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc")
+	before := repo.Run("--base", "none", "--format", "json").Report(0).EntropyScore
+
+	repo.Write("calc/names.go", `package calc
+
+func Name() string {
+	return "calc"
+}
+
+func Version() string {
+	return "1.0"
+}
+`).Commit("add flat functions")
+	after := repo.Run("--base", "none", "--format", "json").Report(0).EntropyScore
+
+	if after > before {
+		t.Errorf("entropyScore rose from %v to %v after adding flat code", before, after)
+	}
+}
+
+func TestAddingNestedCodeRaisesEntropyScore(t *testing.T) {
+	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc")
+	before := repo.Run("--base", "none", "--format", "json").Report(0).EntropyScore
+
+	repo.Write("calc/grid.go", `package calc
+
+func CountPositive(grid [][]int) int {
+	n := 0
+	for _, row := range grid {
+		for _, x := range row {
+			if x > 0 {
+				if x%2 == 0 {
+					n++
+				}
+			}
+		}
+	}
+	return n
+}
+`).Commit("add nested function") // complexity 1+2+3+4 = 10 in 14 lines
+	after := repo.Run("--base", "none", "--format", "json").Report(0).EntropyScore
+
+	if after <= before {
+		t.Errorf("entropyScore did not rise (%v -> %v) after adding nested code", before, after)
+	}
+}
+
+const calcGo = `package calc
 
 func Sign(x int) int {
 	if x > 0 {
@@ -40,7 +167,11 @@ func SumPositive(xs []int) int {
 	}
 	return total
 }
-`).
+`
+
+func TestSnapshotReportsGoFunctionComplexityAsJSON(t *testing.T) {
+	repo := testrepo.New(t).
+		Write("calc/calc.go", calcGo).
 		Commit("add calc")
 
 	r := repo.Run("--base", "none", "--format", "json").Report(0)
@@ -49,15 +180,16 @@ func SumPositive(xs []int) int {
 		t.Errorf("schemaVersion: want 1, got %d", r.SchemaVersion)
 	}
 	want := []testrepo.ReportUnit{
-		{Kind: "function", Name: "Sign", Path: "calc/calc.go", StartLine: 3, EndLine: 8, Complexity: 1},
-		{Kind: "function", Name: "SumPositive", Path: "calc/calc.go", StartLine: 10, EndLine: 18, Complexity: 3},
+		{Kind: "function", Name: "Sign", Path: "calc/calc.go", Module: "calc", StartLine: 3, EndLine: 8, Lines: 6, Complexity: 1},
+		{Kind: "function", Name: "SumPositive", Path: "calc/calc.go", Module: "calc", StartLine: 10, EndLine: 18, Lines: 9, Complexity: 3},
 	}
-	if len(r.Units) != len(want) {
-		t.Fatalf("want %d units, got %d: %+v", len(want), len(r.Units), r.Units)
+	fns := r.UnitsOfKind("function")
+	if len(fns) != len(want) {
+		t.Fatalf("want %d functions, got %d: %+v", len(want), len(fns), fns)
 	}
 	for i, w := range want {
-		if r.Units[i] != w {
-			t.Errorf("unit %d: want %+v, got %+v", i, w, r.Units[i])
+		if fns[i] != w {
+			t.Errorf("function %d: want %+v, got %+v", i, w, fns[i])
 		}
 	}
 }

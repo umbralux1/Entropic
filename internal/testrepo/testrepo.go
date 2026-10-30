@@ -66,8 +66,15 @@ type Result struct {
 
 // Report is the JSON report as a consumer reads it.
 type Report struct {
-	SchemaVersion int          `json:"schemaVersion"`
-	Units         []ReportUnit `json:"units"`
+	SchemaVersion int                     `json:"schemaVersion"`
+	EntropyScore  float64                 `json:"entropyScore"`
+	Signals       map[string]ReportSignal `json:"signals"`
+	Units         []ReportUnit            `json:"units"`
+}
+
+// ReportSignal is the repository-wide summary of one Signal.
+type ReportSignal struct {
+	Value float64 `json:"value"`
 }
 
 // ReportUnit is one Unit in the JSON report.
@@ -75,9 +82,35 @@ type ReportUnit struct {
 	Kind       string `json:"kind"`
 	Name       string `json:"name"`
 	Path       string `json:"path"`
+	Module     string `json:"module"`
 	StartLine  int    `json:"startLine"`
 	EndLine    int    `json:"endLine"`
+	Lines      int    `json:"lines"`
 	Complexity int    `json:"complexity"`
+}
+
+// Unit returns the Unit of the given kind and name, failing the test if
+// there is none.
+func (rep Report) Unit(t *testing.T, kind, name string) ReportUnit {
+	t.Helper()
+	for _, u := range rep.Units {
+		if u.Kind == kind && u.Name == name {
+			return u
+		}
+	}
+	t.Fatalf("no %s Unit named %q in %+v", kind, name, rep.Units)
+	return ReportUnit{}
+}
+
+// UnitsOfKind returns the Units of one kind, in report order.
+func (rep Report) UnitsOfKind(kind string) []ReportUnit {
+	var units []ReportUnit
+	for _, u := range rep.Units {
+		if u.Kind == kind {
+			units = append(units, u)
+		}
+	}
+	return units
 }
 
 // Run runs entropic in-process in the repository.

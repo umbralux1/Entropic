@@ -33,7 +33,7 @@ A single number summarising all Signals as a weighted combination, normalised by
 _Avoid_: Total, grade, health
 
 **Unit**:
-A piece of code a Signal is measured on: a function, class, file or module. Unit values roll up into their enclosing Units.
+A piece of code a Signal is measured on: a function, class, file, Module or the whole repository. Unit values roll up into their enclosing Units.
 _Avoid_: Target, node, entity
 
 **Churn**:

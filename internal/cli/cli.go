@@ -15,8 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/umbralux1/entropic/internal/analysis"
 	"github.com/umbralux1/entropic/internal/language"
+	"github.com/umbralux1/entropic/internal/scoring"
 )
 
 // Exit codes.
@@ -24,22 +24,6 @@ const (
 	ExitOK    = 0
 	ExitError = 2
 )
-
-const schemaVersion = 1
-
-type report struct {
-	SchemaVersion int          `json:"schemaVersion"`
-	Units         []unitReport `json:"units"`
-}
-
-type unitReport struct {
-	Kind       analysis.UnitKind `json:"kind"`
-	Name       string            `json:"name"`
-	Path       string            `json:"path"`
-	StartLine  int               `json:"startLine"`
-	EndLine    int               `json:"endLine"`
-	Complexity int               `json:"complexity"`
-}
 
 // Run executes entropic with args in the repository at dir and returns the
 // process exit code.
@@ -74,12 +58,12 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
-func snapshot(dir string) (report, error) {
+func snapshot(dir string) (scoring.Report, error) {
 	paths, err := trackedFiles(dir)
 	if err != nil {
-		return report{}, err
+		return scoring.Report{}, err
 	}
-	r := report{SchemaVersion: schemaVersion, Units: []unitReport{}}
+	var files []scoring.SourceFile
 	for _, path := range paths {
 		lang, ok := language.ForPath(path)
 		if !ok {
@@ -90,24 +74,11 @@ func snapshot(dir string) (report, error) {
 			continue // tracked by git but deleted from the working tree
 		}
 		if err != nil {
-			return report{}, err
+			return scoring.Report{}, err
 		}
-		units, err := analysis.Analyze(source, lang)
-		if err != nil {
-			return report{}, fmt.Errorf("%s: %w", path, err)
-		}
-		for _, u := range units {
-			r.Units = append(r.Units, unitReport{
-				Kind:       u.Kind,
-				Name:       u.Name,
-				Path:       path,
-				StartLine:  u.StartLine,
-				EndLine:    u.EndLine,
-				Complexity: u.Complexity,
-			})
-		}
+		files = append(files, scoring.SourceFile{Path: path, Source: source, Language: lang})
 	}
-	return r, nil
+	return scoring.Measure(files)
 }
 
 // trackedFiles lists files git knows about or would track, in slash form,

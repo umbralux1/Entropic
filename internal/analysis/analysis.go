@@ -10,7 +10,13 @@ import (
 // UnitKind is the kind of code a Unit covers.
 type UnitKind string
 
-const Function UnitKind = "function"
+// Unit kinds, from finest to coarsest.
+const (
+	Function   UnitKind = "function"
+	File       UnitKind = "file"
+	Module     UnitKind = "module"
+	Repository UnitKind = "repository"
+)
 
 // Unit is a piece of code a Signal is measured on. Lines are 1-based.
 type Unit struct {
