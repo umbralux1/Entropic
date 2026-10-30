@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/umbralux1/entropic/internal/analysis"
+	"github.com/umbralux1/entropic/internal/duplication"
 	"github.com/umbralux1/entropic/internal/scatter"
 )
 
@@ -20,11 +21,6 @@ type SourceFile struct {
 	Language analysis.Language
 	Test     bool
 }
-
-// Signal names one measurable kind of entropy.
-type Signal string
-
-const Complexity Signal = "complexity"
 
 // Report is the result of a measurement. Its own Group is production code;
 // Tests is the same for test files, so they never affect production Signals.
@@ -50,6 +46,8 @@ type Group struct {
 	EntropyScore Figure            `json:"entropyScore"`
 	Signals      map[Signal]Figure `json:"signals"`
 	Units        []Unit            `json:"units"`
+	// CloneGroups are the structural clones found by Duplication.
+	CloneGroups []duplication.CloneGroup `json:"cloneGroups"`
 }
 
 // ModuleOf returns the Module a file belongs to: its directory, "." for the
@@ -72,16 +70,18 @@ type Baseline struct {
 
 // Unit is a measured Unit. Lines counts non-blank lines.
 type Unit struct {
-	Kind       analysis.UnitKind `json:"kind"`
-	Name       string            `json:"name"`
-	Path       string            `json:"path,omitempty"`
-	Module     string            `json:"module,omitempty"`
-	StartLine  int               `json:"startLine,omitempty"`
-	EndLine    int               `json:"endLine,omitempty"`
-	Lines      int               `json:"lines"`
-	Complexity int               `json:"complexity"`
-	Status     Status            `json:"status,omitempty"`
-	Delta      *UnitDelta        `json:"delta,omitempty"`
+	Kind      analysis.UnitKind `json:"kind"`
+	Name      string            `json:"name"`
+	Path      string            `json:"path,omitempty"`
+	Module    string            `json:"module,omitempty"`
+	StartLine int               `json:"startLine,omitempty"`
+	EndLine   int               `json:"endLine,omitempty"`
+	Lines     int               `json:"lines"`
+	// Values are the Unit's value per Signal, written to JSON as one field
+	// per Signal.
+	Values Values     `json:"-"`
+	Status Status     `json:"status,omitempty"`
+	Delta  *UnitDelta `json:"delta,omitempty"`
 	// Informational values are reported on functions but feed no Signal,
 	// Entropy Score or Delta, and do not roll up.
 	Informational *Informational `json:"informational,omitempty"`
@@ -95,8 +95,9 @@ type Informational struct {
 const schemaVersion = 1
 
 // Measure analyses files, splitting production code from tests. weights
-// weigh each Signal in the Entropy Score.
-func Measure(files []SourceFile, weights map[Signal]float64) (Report, error) {
+// weigh each Signal in the Entropy Score; duplicateMinLines is the smallest
+// clone reported, in lines holding code.
+func Measure(files []SourceFile, weights map[Signal]float64, duplicateMinLines int) (Report, error) {
 	var production, tests []SourceFile
 	for _, f := range files {
 		if f.Test {
@@ -107,43 +108,58 @@ func Measure(files []SourceFile, weights map[Signal]float64) (Report, error) {
 	}
 	r := Report{SchemaVersion: schemaVersion}
 	var err error
-	if r.Group, err = measureGroup(production, weights); err != nil {
+	if r.Group, err = measureGroup(production, weights, duplicateMinLines); err != nil {
 		return Report{}, err
 	}
-	if r.Tests, err = measureGroup(tests, weights); err != nil {
+	if r.Tests, err = measureGroup(tests, weights, duplicateMinLines); err != nil {
 		return Report{}, err
 	}
 	return r, nil
 }
 
-// measureGroup returns the Units of files: functions, then classes, then files, then
-// Modules, then the repository.
-func measureGroup(files []SourceFile, weights map[Signal]float64) (Group, error) {
-	var functions, classes, fileUnits []Unit
-	modules := map[string]*Unit{}
-	repo := Unit{Kind: analysis.Repository}
-
-	for _, f := range files {
+// measureGroup returns the Units of files: functions, then classes, then
+// files, then Modules, then the repository. Clones are sought within the group.
+func measureGroup(files []SourceFile, weights map[Signal]float64, duplicateMinLines int) (Group, error) {
+	analysed := make([]analysedFile, len(files))
+	fragments := map[string][]analysis.Fragment{}
+	for i, f := range files {
 		units, err := analysis.Analyze(f.Source, f.Language)
 		if err != nil {
 			return Group{}, fmt.Errorf("%s: %w", f.Path, err)
 		}
+		fragments[f.Path], err = analysis.Fragments(f.Source, f.Language, duplicateMinLines)
+		if err != nil {
+			return Group{}, fmt.Errorf("%s: %w", f.Path, err)
+		}
+		analysed[i] = analysedFile{SourceFile: f, units: units,
+			lines: bytes.Split(bytes.TrimSuffix(f.Source, []byte("\n")), []byte("\n"))}
+	}
+	clones := duplication.Find(fragments)
+	cloned := clonedLines(clones)
+
+	var functions, classes, fileUnits []Unit
+	modules := map[string]*Unit{}
+	repo := Unit{Kind: analysis.Repository, Values: Values{}}
+	for _, f := range analysed {
 		module := ModuleOf(f.Path)
-		lines := bytes.Split(bytes.TrimSuffix(f.Source, []byte("\n")), []byte("\n"))
 		file := Unit{Kind: analysis.File, Name: f.Path, Path: f.Path, Module: module,
-			StartLine: 1, EndLine: len(lines), Lines: nonBlank(lines)}
-		for _, u := range units {
+			StartLine: 1, EndLine: len(f.lines), Lines: nonBlank(f.lines),
+			Values: Values{Duplication: f.duplicated(cloned[f.Path], 1, len(f.lines))}}
+		for _, u := range f.units {
 			unit := Unit{
 				Kind: u.Kind, Name: u.Name, Path: f.Path, Module: module,
 				StartLine: u.StartLine, EndLine: u.EndLine,
-				Lines:      nonBlank(lines[u.StartLine-1 : u.EndLine]),
-				Complexity: u.Complexity,
+				Lines: nonBlank(f.lines[u.StartLine-1 : u.EndLine]),
+				Values: Values{
+					Complexity:  u.Complexity,
+					Duplication: f.duplicated(cloned[f.Path], u.StartLine, u.EndLine),
+				},
 			}
 			// A class already rolls up the functions it encloses, so only
 			// functions roll up into the file.
 			if u.Kind == analysis.Function {
 				unit.Informational = &Informational{Cyclomatic: u.Cyclomatic}
-				file.Complexity += u.Complexity
+				file.Values[Complexity] += u.Complexity
 				functions = append(functions, unit)
 			} else {
 				classes = append(classes, unit)
@@ -153,7 +169,7 @@ func measureGroup(files []SourceFile, weights map[Signal]float64) (Group, error)
 
 		m, ok := modules[module]
 		if !ok {
-			m = &Unit{Kind: analysis.Module, Name: module, Path: module}
+			m = &Unit{Kind: analysis.Module, Name: module, Path: module, Values: Values{}}
 			modules[module] = m
 		}
 		m.add(file)
@@ -171,31 +187,65 @@ func measureGroup(files []SourceFile, weights map[Signal]float64) (Group, error)
 	}
 	units = append(units, repo)
 
-	signals := map[Signal]Figure{Complexity: {Value: float64(repo.Complexity)}}
+	signals := map[Signal]Figure{}
+	for _, s := range Signals {
+		signals[s] = Figure{Value: float64(repo.Values[s])}
+	}
 	return Group{
-		EntropyScore: Figure{Value: entropyScore(signals, weights, repo.Lines)},
+		EntropyScore: Figure{Value: entropyScore(repo, weights)},
 		Signals:      signals,
 		Units:        units,
+		CloneGroups:  clones,
 	}, nil
+}
+
+// analysedFile is a source file with its function Units and its lines.
+type analysedFile struct {
+	SourceFile
+	units []analysis.Unit
+	lines [][]byte
+}
+
+// duplicated counts the non-blank lines from start to end that lie in a clone.
+func (f analysedFile) duplicated(cloned map[int]bool, start, end int) int {
+	n := 0
+	for line := start; line <= end; line++ {
+		if cloned[line] && len(bytes.TrimSpace(f.lines[line-1])) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// clonedLines returns, per file path, the lines lying in any clone.
+func clonedLines(groups []duplication.CloneGroup) map[string]map[int]bool {
+	cloned := map[string]map[int]bool{}
+	for _, g := range groups {
+		for _, l := range g.Locations {
+			if cloned[l.Path] == nil {
+				cloned[l.Path] = map[int]bool{}
+			}
+			for line := l.StartLine; line <= l.EndLine; line++ {
+				cloned[l.Path][line] = true
+			}
+		}
+	}
+	return cloned
 }
 
 // entropyScore weights each Signal and normalises by code size, so that
 // adding code alone does not raise the score.
-func entropyScore(signals map[Signal]Figure, weights map[Signal]float64, lines int) float64 {
-	if lines == 0 {
+func entropyScore(repo Unit, weights map[Signal]float64) float64 {
+	if repo.Lines == 0 {
 		return 0
 	}
-	total := 0.0
-	for s, summary := range signals {
-		total += weights[s] * summary.Value
-	}
-	return total * 100 / float64(lines)
+	return repo.Values.Weighted(weights) * 100 / float64(repo.Lines)
 }
 
 // add rolls a child Unit's values into u.
 func (u *Unit) add(child Unit) {
 	u.Lines += child.Lines
-	u.Complexity += child.Complexity
+	u.Values = u.Values.add(child.Values)
 }
 
 func nonBlank(lines [][]byte) int {

@@ -36,7 +36,8 @@ type Config struct {
 // are provisional until tuned on real repositories.
 func Default() Config {
 	return Config{
-		Weights:           map[string]float64{"complexity": 1},
+		// A duplicated line weighs a tenth of a Complexity point.
+		Weights:           map[string]float64{"complexity": 1, "duplication": 0.1},
 		ChurnWindowDays:   90,
 		DuplicateMinLines: 6,
 	}

@@ -60,6 +60,12 @@ type Language struct {
 	TestPaths []string
 	// Generated matches source marked as generated, which is not measured.
 	Generated *regexp.Regexp
+	// Abstracted are node kinds, identifiers and literals, whose text
+	// Duplication ignores, so that renamed copies still count as clones.
+	Abstracted map[string]bool
+	// Unduplicable are node kinds, such as imports and comments, that
+	// Duplication skips: they neither form a clone nor tell two clones apart.
+	Unduplicable map[string]bool
 }
 
 // IsTest reports whether a slash-separated path holds test code.

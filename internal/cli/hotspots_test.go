@@ -21,9 +21,11 @@ func TestFrequentlyChangedComplexFileRanksAboveUnchangedComplexFile(t *testing.T
 	if len(r.Hotspots) == 0 || r.Hotspots[0].Path != "calc/hot.go" {
 		t.Fatalf("want calc/hot.go as the top Hotspot, got %+v", r.Hotspots)
 	}
-	// hot.go: Complexity 4 (as calcGo), changed in 2 commits inside the window.
-	if h := r.Hotspots[0]; h.Churn != 2 || h.Entropy != 4 || h.Score != 8 {
-		t.Errorf("calc/hot.go: want churn 2, entropy 4, score 8; got %+v", h)
+	// hot.go: Complexity 4 (as calcGo) plus Duplication 15 weighed 0.1: Sign
+	// (6 lines) and SumPositive (9) are clones of cold.go's. Changed in 2
+	// commits inside the window.
+	if h := r.Hotspots[0]; h.Churn != 2 || h.Entropy != 5.5 || h.Score != 11 {
+		t.Errorf("calc/hot.go: want churn 2, entropy 5.5, score 11; got %+v", h)
 	}
 }
 
@@ -113,8 +115,8 @@ func TestChurnDoesNotFeedEntropyScore(t *testing.T) {
 		t.Fatalf("want calc/calc.go with churn 7, got %+v", r.Hotspots)
 	}
 	// As in TestSignalSummaryMatchesRepositoryUnit: Complexity 4 per 16 lines = 25.
-	if r.EntropyScore.Value != 25 || len(r.Signals) != 1 {
-		t.Errorf("want Entropy Score 25 from the complexity Signal alone, got %v from %v",
+	if _, ok := r.Signals["churn"]; r.EntropyScore.Value != 25 || ok {
+		t.Errorf("want Entropy Score 25 from the complexity Signal alone, no churn Signal; got %v from %v",
 			r.EntropyScore.Value, r.Signals)
 	}
 }
