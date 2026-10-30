@@ -172,6 +172,16 @@ func (res Result) Report(want int) Report {
 	return rep
 }
 
+// Text fails the test unless the run exited with want, then returns stdout
+// as the text report.
+func (res Result) Text(want int) string {
+	res.t.Helper()
+	if res.Code != want {
+		res.t.Fatalf("exit code: want %d, got %d; stderr: %s", want, res.Code, res.Stderr)
+	}
+	return res.Stdout
+}
+
 // Branch creates a branch at HEAD and switches to it.
 func (r *Repo) Branch(name string) *Repo {
 	r.t.Helper()
