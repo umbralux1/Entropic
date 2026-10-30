@@ -10,6 +10,7 @@ import (
 
 	"github.com/umbralux1/entropic/internal/config"
 	"github.com/umbralux1/entropic/internal/language"
+	"github.com/umbralux1/entropic/internal/policy"
 	"github.com/umbralux1/entropic/internal/reporters"
 	"github.com/umbralux1/entropic/internal/revisions"
 	"github.com/umbralux1/entropic/internal/scatter"
@@ -18,8 +19,9 @@ import (
 
 // Exit codes.
 const (
-	ExitOK    = 0
-	ExitError = 2
+	ExitOK                = 0
+	ExitThresholdExceeded = 1
+	ExitError             = 2
 )
 
 // renderers maps each --format value to its reporter.
@@ -58,9 +60,13 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
 		return ExitError
 	}
+	r.Violations = policy.Evaluate(r, cfg.Thresholds)
 	if err := render(stdout, r); err != nil {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
 		return ExitError
+	}
+	if len(r.Violations) > 0 {
+		return ExitThresholdExceeded
 	}
 	return ExitOK
 }

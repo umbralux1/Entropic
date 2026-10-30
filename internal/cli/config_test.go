@@ -238,6 +238,8 @@ func TestInvalidConfigFailsWithClearErrorAndExitCode2(t *testing.T) {
 		{"bad exclude pattern", "exclude = [\"gen/[\"]\n", "gen/["},
 		{"non-positive churn window", "churn_window_days = 0\n", "churn_window_days"},
 		{"non-positive duplicate minimum size", "duplicate_min_lines = -3\n", "duplicate_min_lines"},
+		{"unknown threshold", "[thresholds]\ncomplexty = 3\n", "complexty"},
+		{"negative threshold", "[thresholds]\nentropy_score = -1\n", "entropy_score"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

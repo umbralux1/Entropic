@@ -30,6 +30,18 @@ type Config struct {
 	ChurnWindowDays int `toml:"churn_window_days"`
 	// DuplicateMinLines is the smallest duplicate worth reporting.
 	DuplicateMinLines int `toml:"duplicate_min_lines"`
+	// Thresholds bound how much a change may raise entropy.
+	Thresholds Thresholds `toml:"thresholds"`
+}
+
+// Thresholds bound the Delta of a change; exceeding any is a violation.
+type Thresholds struct {
+	// Complexity is the most Complexity any one function may gain.
+	Complexity float64 `toml:"complexity"`
+	// EntropyScore is the most the Entropy Score may rise.
+	EntropyScore float64 `toml:"entropy_score"`
+	// Scatter is how many Modules a change may touch beyond its Scatter Budget.
+	Scatter float64 `toml:"scatter"`
 }
 
 // Default is the configuration used when there is no config file. Values
@@ -39,6 +51,7 @@ func Default() Config {
 		Weights:           map[string]float64{"complexity": 1},
 		ChurnWindowDays:   90,
 		DuplicateMinLines: 6,
+		Thresholds:        Thresholds{Complexity: 10, EntropyScore: 10, Scatter: 0},
 	}
 }
 
@@ -87,6 +100,15 @@ func validate(cfg Config, meta toml.MetaData) error {
 	}
 	if cfg.ChurnWindowDays <= 0 {
 		return fmt.Errorf("churn_window_days must be positive, got %d", cfg.ChurnWindowDays)
+	}
+	for name, limit := range map[string]float64{
+		"complexity":    cfg.Thresholds.Complexity,
+		"entropy_score": cfg.Thresholds.EntropyScore,
+		"scatter":       cfg.Thresholds.Scatter,
+	} {
+		if limit < 0 {
+			return fmt.Errorf("thresholds: %s must not be negative, got %v", name, limit)
+		}
 	}
 	if cfg.DuplicateMinLines <= 0 {
 		return fmt.Errorf("duplicate_min_lines must be positive, got %d", cfg.DuplicateMinLines)

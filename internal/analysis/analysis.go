@@ -96,6 +96,9 @@ func Analyze(source []byte, lang Language) ([]Unit, error) {
 	}
 	tree := parser.Parse(source, nil)
 	defer tree.Close()
+	if root := tree.RootNode(); root.HasError() {
+		return nil, fmt.Errorf("syntax error at line %d", firstError(root).StartPosition().Row+1)
+	}
 
 	var units []Unit
 	var visit func(n *sitter.Node)
@@ -116,4 +119,18 @@ func Analyze(source []byte, lang Language) ([]Unit, error) {
 	}
 	visit(tree.RootNode())
 	return units, nil
+}
+
+// firstError returns the first error or missing node below n, which has an
+// error somewhere in its subtree; n itself if none is found.
+func firstError(n *sitter.Node) *sitter.Node {
+	if n.IsError() || n.IsMissing() {
+		return n
+	}
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if c := n.Child(i); c.HasError() || c.IsMissing() {
+			return firstError(c)
+		}
+	}
+	return n
 }

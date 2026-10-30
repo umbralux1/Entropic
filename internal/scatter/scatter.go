@@ -20,6 +20,8 @@ type Change struct {
 type Scatter struct {
 	// Modules is the number of Modules the change touches: the Scatter Signal.
 	Modules int `json:"modules"`
+	// TouchedModules names those Modules, sorted.
+	TouchedModules []string `json:"touchedModules"`
 	// Budget is the Scatter Budget for a change of this size.
 	Budget       float64 `json:"budget"`
 	OverBudget   bool    `json:"overBudget"`
@@ -52,10 +54,11 @@ func Measure(changes []Change) Scatter {
 		s.Informational.Files++
 	}
 	s.Modules = len(perModule)
+	s.TouchedModules = slices.Sorted(maps.Keys(perModule))
 	s.Budget = budget(s.ChangedLines)
 	s.OverBudget = float64(s.Modules) > s.Budget
 	if s.ChangedLines > 0 {
-		s.Informational.Entropy = entropy(perModule, s.ChangedLines)
+		s.Informational.Entropy = entropy(perModule, s.TouchedModules, s.ChangedLines)
 		s.Informational.EffectiveModules = math.Exp2(s.Informational.Entropy)
 	}
 	return s
@@ -67,10 +70,10 @@ func budget(changedLines int) float64 {
 	return 1 + math.Log2(1+float64(changedLines)/10)
 }
 
-// entropy sums in Module order so the result is identical run to run.
-func entropy(perModule map[string]int, total int) float64 {
+// entropy sums in touched (sorted) Module order so the result is identical run to run.
+func entropy(perModule map[string]int, touched []string, total int) float64 {
 	h := 0.0
-	for _, m := range slices.Sorted(maps.Keys(perModule)) {
+	for _, m := range touched {
 		p := float64(perModule[m]) / float64(total)
 		h -= p * math.Log2(p)
 	}

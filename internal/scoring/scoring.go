@@ -41,6 +41,8 @@ type Report struct {
 	// Scatter is the Scatter of the change since the Baseline, test files
 	// included; nil for a snapshot.
 	Scatter *scatter.Scatter `json:"scatter,omitempty"`
+	// Violations are the thresholds the change exceeded; none for a snapshot.
+	Violations []Violation `json:"violations"`
 }
 
 // Group is the measurement of one group of files, rolled up to its own
