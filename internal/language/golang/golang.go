@@ -20,6 +20,23 @@ var Language = analysis.Language{
 	UnitName:   unitName,
 	Complexity: complexity,
 	Cyclomatic: cyclomatic,
+	Abstracted: map[string]bool{
+		"identifier":                 true,
+		"field_identifier":           true,
+		"package_identifier":         true,
+		"type_identifier":            true,
+		"label_name":                 true,
+		"int_literal":                true,
+		"float_literal":              true,
+		"imaginary_literal":          true,
+		"rune_literal":               true,
+		"interpreted_string_literal": true,
+		"raw_string_literal":         true,
+	},
+	Unduplicable: map[string]bool{
+		"import_declaration": true,
+		"comment":            true,
+	},
 }
 
 // unitName names a function by its identifier and a method by its receiver

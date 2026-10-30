@@ -44,8 +44,11 @@ func Text(w io.Writer, r scoring.Report) error {
 	b.WriteString("\nUnits\n")
 	tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
 	for _, u := range bySeverity(r.Units) {
-		fmt.Fprintf(tw, "  %s\t%s\t%s\tcomplexity %s\t%s\n",
-			u.Kind, u.Name, location(u), unitComplexity(u), u.Status)
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t", u.Kind, u.Name, location(u))
+		for _, s := range scoring.Signals {
+			fmt.Fprintf(tw, "%s %s\t", s, unitValue(u, s))
+		}
+		fmt.Fprintf(tw, "%s\n", u.Status)
 	}
 	if err := tw.Flush(); err != nil {
 		return err
@@ -55,7 +58,8 @@ func Text(w io.Writer, r scoring.Report) error {
 }
 
 // bySeverity returns units grouped by kind, finest first, and within a kind
-// ordered by Complexity Delta, largest first (by Complexity for a snapshot).
+// ordered by weighted Signal Delta, largest first (by weighted Signal values
+// for a snapshot).
 func bySeverity(units []scoring.Unit) []scoring.Unit {
 	rank := map[analysis.UnitKind]int{}
 	for _, u := range units {
@@ -72,16 +76,16 @@ func bySeverity(units []scoring.Unit) []scoring.Unit {
 		if severity(a) != severity(b) {
 			return severity(a) > severity(b)
 		}
-		return a.Complexity > b.Complexity
+		return a.Values.Weighted() > b.Values.Weighted()
 	})
 	return out
 }
 
-func severity(u scoring.Unit) int {
+func severity(u scoring.Unit) float64 {
 	if u.Delta == nil {
-		return u.Complexity
+		return u.Values.Weighted()
 	}
-	return u.Delta.Complexity
+	return u.Delta.Values.Weighted()
 }
 
 func figure(f scoring.Figure) string {
@@ -101,11 +105,11 @@ func number(v float64) string {
 	return strings.TrimSuffix(s, ".")
 }
 
-func unitComplexity(u scoring.Unit) string {
+func unitValue(u scoring.Unit, s scoring.Signal) string {
 	if u.Delta == nil {
-		return fmt.Sprint(u.Complexity)
+		return fmt.Sprint(u.Values[s])
 	}
-	return fmt.Sprintf("%d (%+d)", u.Complexity, u.Delta.Complexity)
+	return fmt.Sprintf("%d (%+d)", u.Values[s], u.Delta.Values[s])
 }
 
 // location is where a Unit lives: path and line range for functions and

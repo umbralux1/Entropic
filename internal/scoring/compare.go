@@ -18,8 +18,9 @@ const (
 
 // UnitDelta is a Unit's change in value against the Baseline.
 type UnitDelta struct {
-	Lines      int `json:"lines"`
-	Complexity int `json:"complexity"`
+	Lines int `json:"lines"`
+	// Values are the change per Signal, written to JSON as one field per Signal.
+	Values Values `json:"-"`
 }
 
 // Compare returns current with every Unit marked and given its Delta against
@@ -42,11 +43,11 @@ func Compare(current, baseline Report) Report {
 		u := current.Units[i]
 		b, existed := before[key]
 		delete(before, key)
-		u.Delta = &UnitDelta{Lines: u.Lines - b.Lines, Complexity: u.Complexity - b.Complexity}
+		u.Delta = &UnitDelta{Lines: u.Lines - b.Lines, Values: u.Values.minus(b.Values)}
 		switch {
 		case !existed:
 			u.Status = Added
-		case *u.Delta != UnitDelta{}:
+		case u.Delta.Lines != 0 || !u.Delta.Values.isZero():
 			u.Status = Changed
 		default:
 			u.Status = Unchanged
@@ -59,9 +60,9 @@ func Compare(current, baseline Report) Report {
 			continue
 		}
 		u := b
-		u.Lines, u.Complexity = 0, 0
+		u.Lines, u.Values = 0, Values{}
 		u.Status = Removed
-		u.Delta = &UnitDelta{Lines: -b.Lines, Complexity: -b.Complexity}
+		u.Delta = &UnitDelta{Lines: -b.Lines, Values: Values{}.minus(b.Values)}
 		out.Units = append(out.Units, u)
 	}
 	return out

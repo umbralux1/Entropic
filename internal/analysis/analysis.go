@@ -45,6 +45,12 @@ type Language struct {
 	Complexity func(fn *sitter.Node, source []byte) int
 	// Cyclomatic counts the independent paths through fn.
 	Cyclomatic func(fn *sitter.Node) int
+	// Abstracted are node kinds, identifiers and literals, whose text
+	// Duplication ignores, so that renamed copies still count as clones.
+	Abstracted map[string]bool
+	// Unduplicable are node kinds, such as imports and comments, that
+	// Duplication skips: they neither form a clone nor tell two clones apart.
+	Unduplicable map[string]bool
 }
 
 // Analyze parses source in the given language and returns its function Units
