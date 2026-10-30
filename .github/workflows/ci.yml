@@ -36,3 +36,17 @@ jobs:
           go run ./cmd/entropic --base none --format json > /dev/null
           code=$?
           [ "$code" -lt 2 ] || { echo "entropic failed on its own repo (exit $code)"; exit 1; }
+
+      - name: dogfood with Baseline
+        # Measure this PR's Delta against where it forks from its base branch,
+        # so Baseline resolution, Scatter and thresholds run on real history.
+        # Threshold violations (exit 1) are shown, not fatal; exit 2 is.
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set +e
+          base=$(git merge-base HEAD "origin/$BASE_REF") || { echo "no merge-base with origin/$BASE_REF"; exit 1; }
+          go run ./cmd/entropic --base "$base" --format text
+          code=$?
+          [ "$code" -lt 2 ] || { echo "entropic failed on its own repo (exit $code)"; exit 1; }
