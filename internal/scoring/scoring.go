@@ -74,10 +74,10 @@ type Informational struct {
 
 const schemaVersion = 1
 
-// Measure analyses files and returns their Units: functions, then files,
+// Measure analyses files and returns their Units: functions, then classes, then files,
 // then Modules, then the repository.
 func Measure(files []SourceFile) (Report, error) {
-	var functions, fileUnits []Unit
+	var functions, classes, fileUnits []Unit
 	modules := map[string]*Unit{}
 	repo := Unit{Kind: analysis.Repository}
 
@@ -91,14 +91,21 @@ func Measure(files []SourceFile) (Report, error) {
 		file := Unit{Kind: analysis.File, Name: f.Path, Path: f.Path, Module: module,
 			StartLine: 1, EndLine: len(lines), Lines: nonBlank(lines)}
 		for _, u := range units {
-			functions = append(functions, Unit{
+			unit := Unit{
 				Kind: u.Kind, Name: u.Name, Path: f.Path, Module: module,
 				StartLine: u.StartLine, EndLine: u.EndLine,
-				Lines:         nonBlank(lines[u.StartLine-1 : u.EndLine]),
-				Complexity:    u.Complexity,
-				Informational: &Informational{Cyclomatic: u.Cyclomatic},
-			})
-			file.Complexity += u.Complexity
+				Lines:      nonBlank(lines[u.StartLine-1 : u.EndLine]),
+				Complexity: u.Complexity,
+			}
+			// A class already rolls up the functions it encloses, so only
+			// functions roll up into the file.
+			if u.Kind == analysis.Function {
+				unit.Informational = &Informational{Cyclomatic: u.Cyclomatic}
+				file.Complexity += u.Complexity
+				functions = append(functions, unit)
+			} else {
+				classes = append(classes, unit)
+			}
 		}
 		fileUnits = append(fileUnits, file)
 
@@ -111,7 +118,7 @@ func Measure(files []SourceFile) (Report, error) {
 		repo.add(file)
 	}
 
-	units := append(functions, fileUnits...)
+	units := append(append(functions, classes...), fileUnits...)
 	names := make([]string, 0, len(modules))
 	for name := range modules {
 		names = append(names, name)
