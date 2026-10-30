@@ -3,19 +3,13 @@
 package cli
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 
 	"github.com/umbralux1/entropic/internal/language"
+	"github.com/umbralux1/entropic/internal/revisions"
 	"github.com/umbralux1/entropic/internal/scoring"
 )
 
@@ -30,13 +24,10 @@ const (
 func Run(args []string, dir string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("entropic", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	base := flags.String("base", "none", "Baseline revision to compare against, or none for a snapshot")
+	base := flags.String("base", revisions.Auto,
+		"Baseline revision to compare against, or none for a snapshot (default: HEAD if the working tree is dirty, else merge-base with main)")
 	format := flags.String("format", "json", "output format: json")
 	if err := flags.Parse(args); err != nil {
-		return ExitError
-	}
-	if *base != "none" {
-		fmt.Fprintf(stderr, "entropic: --base %s is not supported yet; use --base none\n", *base)
 		return ExitError
 	}
 	if *format != "json" {
@@ -44,7 +35,7 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 		return ExitError
 	}
 
-	r, err := snapshot(dir)
+	r, err := measure(dir, *base)
 	if err != nil {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
 		return ExitError
@@ -58,45 +49,45 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
-func snapshot(dir string) (scoring.Report, error) {
-	paths, err := trackedFiles(dir)
+// measure measures the working tree and, unless base is none, compares it
+// against the Baseline.
+func measure(dir, base string) (scoring.Report, error) {
+	baseline, err := revisions.Resolve(dir, base)
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	var files []scoring.SourceFile
-	for _, path := range paths {
-		lang, ok := language.ForPath(path)
-		if !ok {
-			continue
-		}
-		source, err := os.ReadFile(filepath.Join(dir, path))
-		if errors.Is(err, fs.ErrNotExist) {
-			continue // tracked by git but deleted from the working tree
-		}
-		if err != nil {
-			return scoring.Report{}, err
-		}
-		files = append(files, scoring.SourceFile{Path: path, Source: source, Language: lang})
+	files, err := revisions.WorkingTree(dir, isSource)
+	if err != nil {
+		return scoring.Report{}, err
 	}
-	return scoring.Measure(files)
+	current, err := scoring.Measure(sourceFiles(files))
+	if err != nil || baseline == nil {
+		return current, err
+	}
+
+	files, err = revisions.AtCommit(dir, baseline.Commit, isSource)
+	if err != nil {
+		return scoring.Report{}, err
+	}
+	before, err := scoring.Measure(sourceFiles(files))
+	if err != nil {
+		return scoring.Report{}, fmt.Errorf("at Baseline %s: %w", baseline.Ref, err)
+	}
+	r := scoring.Compare(current, before)
+	r.Baseline = &scoring.Baseline{Ref: baseline.Ref, Commit: baseline.Commit}
+	return r, nil
 }
 
-// trackedFiles lists files git knows about or would track, in slash form,
-// relative to dir.
-func trackedFiles(dir string) ([]string, error) {
-	cmd := exec.Command("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard")
-	cmd.Dir = dir
-	var errOut bytes.Buffer
-	cmd.Stderr = &errOut
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("list files: %w: %s", err, strings.TrimSpace(errOut.String()))
+func isSource(path string) bool {
+	_, ok := language.ForPath(path)
+	return ok
+}
+
+func sourceFiles(files []revisions.File) []scoring.SourceFile {
+	out := make([]scoring.SourceFile, len(files))
+	for i, f := range files {
+		lang, _ := language.ForPath(f.Path)
+		out[i] = scoring.SourceFile{Path: f.Path, Source: f.Source, Language: lang}
 	}
-	var paths []string
-	for _, p := range strings.Split(string(out), "\x00") {
-		if p != "" {
-			paths = append(paths, p)
-		}
-	}
-	return paths, nil
+	return out
 }

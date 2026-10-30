@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/umbralux1/entropic/internal/cli"
@@ -24,6 +25,19 @@ func New(t *testing.T) *Repo {
 	r := &Repo{t: t, Dir: t.TempDir()}
 	r.git("init", "-q", "-b", "main")
 	return r
+}
+
+// CICheckout clones the repository the way CI checks out a branch: HEAD
+// detached at that branch, and main present only as origin/main.
+func (r *Repo) CICheckout(branch string) *Repo {
+	r.t.Helper()
+	clone := &Repo{t: r.t, Dir: r.t.TempDir()}
+	clone.git("clone", "-q", r.Dir, clone.Dir)
+	clone.git("switch", "-q", "--detach", "origin/"+branch)
+	for _, local := range strings.Fields(clone.git("for-each-ref", "--format=%(refname:short)", "refs/heads")) {
+		clone.git("branch", "-q", "-D", local)
+	}
+	return clone
 }
 
 // Write creates or replaces a file, creating parent directories as needed.
@@ -67,26 +81,42 @@ type Result struct {
 // Report is the JSON report as a consumer reads it.
 type Report struct {
 	SchemaVersion int                     `json:"schemaVersion"`
-	EntropyScore  float64                 `json:"entropyScore"`
-	Signals       map[string]ReportSignal `json:"signals"`
+	Baseline      *ReportBaseline         `json:"baseline"`
+	EntropyScore  ReportFigure            `json:"entropyScore"`
+	Signals       map[string]ReportFigure `json:"signals"`
 	Units         []ReportUnit            `json:"units"`
 }
 
-// ReportSignal is the repository-wide summary of one Signal.
-type ReportSignal struct {
+// ReportBaseline is the Baseline a report was compared against.
+type ReportBaseline struct {
+	Ref    string `json:"ref"`
+	Commit string `json:"commit"`
+}
+
+// ReportDelta is a Unit's change against the Baseline.
+type ReportDelta struct {
+	Lines      int `json:"lines"`
+	Complexity int `json:"complexity"`
+}
+
+// ReportFigure is a repository-wide number (a Signal or the Entropy Score) and its Delta.
+type ReportFigure struct {
+	Delta float64 `json:"delta"`
 	Value float64 `json:"value"`
 }
 
 // ReportUnit is one Unit in the JSON report.
 type ReportUnit struct {
-	Kind       string `json:"kind"`
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	Module     string `json:"module"`
-	StartLine  int    `json:"startLine"`
-	EndLine    int    `json:"endLine"`
-	Lines      int    `json:"lines"`
-	Complexity int    `json:"complexity"`
+	Kind       string      `json:"kind"`
+	Name       string      `json:"name"`
+	Path       string      `json:"path"`
+	Module     string      `json:"module"`
+	StartLine  int         `json:"startLine"`
+	EndLine    int         `json:"endLine"`
+	Lines      int         `json:"lines"`
+	Complexity int         `json:"complexity"`
+	Status     string      `json:"status"`
+	Delta      ReportDelta `json:"delta"`
 }
 
 // Unit returns the Unit of the given kind and name, failing the test if
@@ -135,7 +165,51 @@ func (res Result) Report(want int) Report {
 	return rep
 }
 
-func (r *Repo) git(args ...string) {
+// Branch creates a branch at HEAD and switches to it.
+func (r *Repo) Branch(name string) *Repo {
+	r.t.Helper()
+	r.git("switch", "-q", "-c", name)
+	return r
+}
+
+// Switch switches to an existing branch.
+func (r *Repo) Switch(name string) *Repo {
+	r.t.Helper()
+	r.git("switch", "-q", name)
+	return r
+}
+
+// State is git's porcelain status plus the content of every file on disk,
+// so tests can prove a run left the working tree as it found it.
+func (r *Repo) State() string {
+	r.t.Helper()
+	state := r.git("status", "--porcelain", "--untracked-files=all")
+	err := filepath.WalkDir(r.Dir, func(path string, d os.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case d.IsDir() && d.Name() == ".git":
+			return filepath.SkipDir
+		case d.IsDir():
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		state += "\n== " + path + "\n" + string(content)
+		return err
+	})
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return state
+}
+
+// Rev returns the commit a revision points at.
+func (r *Repo) Rev(ref string) string {
+	r.t.Helper()
+	return strings.TrimSpace(r.git("rev-parse", ref))
+}
+
+func (r *Repo) git(args ...string) string {
 	r.t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.Dir
@@ -144,7 +218,9 @@ func (r *Repo) git(args ...string) {
 		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
 		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
 	)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		r.t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
+	return string(out)
 }

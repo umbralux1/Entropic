@@ -30,15 +30,24 @@ var weights = map[Signal]float64{Complexity: 1}
 // Report is the result of a measurement.
 type Report struct {
 	SchemaVersion int `json:"schemaVersion"`
+	// Baseline is nil for a snapshot.
+	Baseline *Baseline `json:"baseline"`
 	// EntropyScore is the weighted Signal total per 100 non-blank lines.
-	EntropyScore float64                  `json:"entropyScore"`
-	Signals      map[Signal]SignalSummary `json:"signals"`
-	Units        []Unit                   `json:"units"`
+	EntropyScore Figure            `json:"entropyScore"`
+	Signals      map[Signal]Figure `json:"signals"`
+	Units        []Unit            `json:"units"`
 }
 
-// SignalSummary is the repository-wide value of one Signal.
-type SignalSummary struct {
-	Value float64 `json:"value"`
+// Figure is a repository-wide number and, when there is a Baseline, its Delta.
+type Figure struct {
+	Value float64  `json:"value"`
+	Delta *float64 `json:"delta,omitempty"`
+}
+
+// Baseline is the commit a report was compared against, and how it was chosen.
+type Baseline struct {
+	Ref    string `json:"ref"`
+	Commit string `json:"commit"`
 }
 
 // Unit is a measured Unit. Lines counts non-blank lines.
@@ -51,6 +60,8 @@ type Unit struct {
 	EndLine    int               `json:"endLine,omitempty"`
 	Lines      int               `json:"lines"`
 	Complexity int               `json:"complexity"`
+	Status     Status            `json:"status,omitempty"`
+	Delta      *UnitDelta        `json:"delta,omitempty"`
 }
 
 const schemaVersion = 1
@@ -102,10 +113,10 @@ func Measure(files []SourceFile) (Report, error) {
 	}
 	units = append(units, repo)
 
-	signals := map[Signal]SignalSummary{Complexity: {Value: float64(repo.Complexity)}}
+	signals := map[Signal]Figure{Complexity: {Value: float64(repo.Complexity)}}
 	return Report{
 		SchemaVersion: schemaVersion,
-		EntropyScore:  entropyScore(signals, repo.Lines),
+		EntropyScore:  Figure{Value: entropyScore(signals, repo.Lines)},
 		Signals:       signals,
 		Units:         units,
 	}, nil
@@ -113,7 +124,7 @@ func Measure(files []SourceFile) (Report, error) {
 
 // entropyScore weights each Signal and normalises by code size, so that
 // adding code alone does not raise the score.
-func entropyScore(signals map[Signal]SignalSummary, lines int) float64 {
+func entropyScore(signals map[Signal]Figure, lines int) float64 {
 	if lines == 0 {
 		return 0
 	}

@@ -76,8 +76,8 @@ func TestSignalSummaryMatchesRepositoryUnit(t *testing.T) {
 		t.Errorf("complexity Signal: want 4, got %v", got)
 	}
 	// Entropy Score is a density: Complexity 4 per 16 non-blank lines = 25 per 100 lines.
-	if r.EntropyScore != 25 {
-		t.Errorf("entropyScore: want 25, got %v", r.EntropyScore)
+	if r.EntropyScore.Value != 25 {
+		t.Errorf("entropyScore: want 25, got %v", r.EntropyScore.Value)
 	}
 }
 
@@ -94,8 +94,8 @@ func Zero() int {
 
 	// Complexity 4 per 16+5 = 21 non-blank lines = 19.047619... per 100 lines;
 	// a rounded score would hide small Deltas in large repositories.
-	if want := 400.0 / 21; math.Abs(r.EntropyScore-want) > 1e-9 {
-		t.Errorf("entropyScore: want %v, got %v", want, r.EntropyScore)
+	if want := 400.0 / 21; math.Abs(r.EntropyScore.Value-want) > 1e-9 {
+		t.Errorf("entropyScore: want %v, got %v", want, r.EntropyScore.Value)
 	}
 }
 
@@ -103,7 +103,7 @@ func Zero() int {
 // while adding code denser than the repository average raises it.
 func TestAddingFlatCodeDoesNotRaiseEntropyScore(t *testing.T) {
 	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc")
-	before := repo.Run("--base", "none", "--format", "json").Report(0).EntropyScore
+	before := repo.Run("--base", "none", "--format", "json").Report(0).EntropyScore.Value
 
 	repo.Write("calc/names.go", `package calc
 
@@ -115,7 +115,7 @@ func Version() string {
 	return "1.0"
 }
 `).Commit("add flat functions")
-	after := repo.Run("--base", "none", "--format", "json").Report(0).EntropyScore
+	after := repo.Run("--base", "none", "--format", "json").Report(0).EntropyScore.Value
 
 	if after > before {
 		t.Errorf("entropyScore rose from %v to %v after adding flat code", before, after)
@@ -124,7 +124,7 @@ func Version() string {
 
 func TestAddingNestedCodeRaisesEntropyScore(t *testing.T) {
 	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc")
-	before := repo.Run("--base", "none", "--format", "json").Report(0).EntropyScore
+	before := repo.Run("--base", "none", "--format", "json").Report(0).EntropyScore.Value
 
 	repo.Write("calc/grid.go", `package calc
 
@@ -142,7 +142,7 @@ func CountPositive(grid [][]int) int {
 	return n
 }
 `).Commit("add nested function") // complexity 1+2+3+4 = 10 in 14 lines
-	after := repo.Run("--base", "none", "--format", "json").Report(0).EntropyScore
+	after := repo.Run("--base", "none", "--format", "json").Report(0).EntropyScore.Value
 
 	if after <= before {
 		t.Errorf("entropyScore did not rise (%v -> %v) after adding nested code", before, after)
