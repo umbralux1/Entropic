@@ -55,9 +55,10 @@ type Language struct {
 	Cyclomatic func(fn *sitter.Node) int
 	// VendorDirs are directory names holding vendored code, not measured.
 	VendorDirs []string
-	// TestPaths are path.Match patterns for test code: a file is a test when
-	// its name or any directory above it matches one.
-	TestPaths []string
+	// TestFiles are path.Match patterns for the names of test files.
+	TestFiles []string
+	// TestDirs are directory names, matched exactly, holding test code.
+	TestDirs []string
 	// Generated matches source marked as generated, which is not measured.
 	Generated *regexp.Regexp
 	// Abstracted are node kinds, identifiers and literals, whose text
@@ -68,13 +69,19 @@ type Language struct {
 	Unduplicable map[string]bool
 }
 
-// IsTest reports whether a slash-separated path holds test code.
+// IsTest reports whether a slash-separated path holds test code: its file
+// name matches a TestFiles pattern, or a directory above it is a TestDirs entry.
 func (l Language) IsTest(p string) bool {
-	for _, elem := range strings.Split(p, "/") {
-		for _, pattern := range l.TestPaths {
-			if ok, _ := path.Match(pattern, elem); ok {
-				return true
-			}
+	dirs := strings.Split(p, "/")
+	name := dirs[len(dirs)-1]
+	for _, pattern := range l.TestFiles {
+		if ok, _ := path.Match(pattern, name); ok {
+			return true
+		}
+	}
+	for _, d := range dirs[:len(dirs)-1] {
+		if slices.Contains(l.TestDirs, d) {
+			return true
 		}
 	}
 	return false

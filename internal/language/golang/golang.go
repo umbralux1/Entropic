@@ -23,7 +23,7 @@ var Language = analysis.Language{
 	Complexity: complexity,
 	Cyclomatic: cyclomatic,
 	VendorDirs: []string{"vendor"},
-	TestPaths:  []string{"*_test.go"},
+	TestFiles:  []string{"*_test.go"},
 	// The convention from "go help generate".
 	Generated: regexp.MustCompile(`(?m)^// Code generated .* DO NOT EDIT\.$`),
 	Abstracted: map[string]bool{
