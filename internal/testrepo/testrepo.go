@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/umbralux1/entropic/internal/cli"
 )
@@ -70,6 +71,24 @@ func (r *Repo) Commit(message string) *Repo {
 	return r
 }
 
+// CommitDaysAgo stages everything and commits it with author and committer
+// dates set the given number of days before now.
+func (r *Repo) CommitDaysAgo(days int, message string) *Repo {
+	r.t.Helper()
+	date := time.Now().AddDate(0, 0, -days).Format(time.RFC3339)
+	r.git("add", "-A")
+	r.gitEnv([]string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date},
+		"commit", "-q", "-m", message)
+	return r
+}
+
+// Move renames a file in the working tree and stages the rename.
+func (r *Repo) Move(from, to string) *Repo {
+	r.t.Helper()
+	r.git("mv", from, to)
+	return r
+}
+
 // Result is what one entropic run produced.
 type Result struct {
 	t      *testing.T
@@ -85,6 +104,16 @@ type Report struct {
 	EntropyScore  ReportFigure            `json:"entropyScore"`
 	Signals       map[string]ReportFigure `json:"signals"`
 	Units         []ReportUnit            `json:"units"`
+	ChurnWindow   int                     `json:"churnWindowDays"`
+	Hotspots      []ReportHotspot         `json:"hotspots"`
+}
+
+// ReportHotspot is a file Unit ranked by entropy times Churn.
+type ReportHotspot struct {
+	Path    string  `json:"path"`
+	Churn   int     `json:"churn"`
+	Entropy float64 `json:"entropy"`
+	Score   float64 `json:"score"`
 }
 
 // ReportBaseline is the Baseline a report was compared against.
@@ -221,9 +250,14 @@ func (r *Repo) Rev(ref string) string {
 
 func (r *Repo) git(args ...string) string {
 	r.t.Helper()
+	return r.gitEnv(nil, args...)
+}
+
+func (r *Repo) gitEnv(env []string, args ...string) string {
+	r.t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.Dir
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(append(os.Environ(), env...),
 		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
 		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
 		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",

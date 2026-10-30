@@ -36,6 +36,9 @@ type Report struct {
 	EntropyScore Figure            `json:"entropyScore"`
 	Signals      map[Signal]Figure `json:"signals"`
 	Units        []Unit            `json:"units"`
+	// ChurnWindowDays is the history window Hotspot Churn was counted over.
+	ChurnWindowDays int       `json:"churnWindowDays"`
+	Hotspots        []Hotspot `json:"hotspots"`
 }
 
 // Figure is a repository-wide number and, when there is a Baseline, its Delta.

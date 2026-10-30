@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/umbralux1/entropic/internal/language"
 	"github.com/umbralux1/entropic/internal/reporters"
@@ -43,6 +44,9 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 	}
 
 	r, err := measure(dir, *base)
+	if err == nil {
+		r, err = withHotspots(dir, r, defaultChurnWindowDays)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
 		return ExitError
@@ -52,6 +56,19 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 		return ExitError
 	}
 	return ExitOK
+}
+
+// defaultChurnWindowDays is how far back Churn looks when nothing else says.
+// Ticket #8 makes it configurable; pass the configured value to withHotspots.
+const defaultChurnWindowDays = 90
+
+// withHotspots counts Churn over the last windowDays and ranks r's Hotspots.
+func withHotspots(dir string, r scoring.Report, windowDays int) (scoring.Report, error) {
+	churn, err := revisions.Churn(dir, time.Now().AddDate(0, 0, -windowDays))
+	if err != nil {
+		return scoring.Report{}, err
+	}
+	return r.WithHotspots(churn, windowDays), nil
 }
 
 // measure measures the working tree and, unless base is none, compares it
