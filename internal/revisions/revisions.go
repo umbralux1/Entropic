@@ -164,6 +164,28 @@ func ChangedLines(dir, commit string, want func(path string) bool) (map[string]i
 	return changed, nil
 }
 
+// Renames returns the files git detects as renamed between commit and the
+// working tree, mapping each old path to its new one. Renames of untracked
+// files are not detected: git sees only a deletion.
+func Renames(dir, commit string) (map[string]string, error) {
+	out, err := git(dir, "diff", "-z", "--name-status", "-M", commit, "--")
+	if err != nil {
+		return nil, fmt.Errorf("find renames since %s: %w", commit, err)
+	}
+	renames := map[string]string{}
+	fields := splitNUL(out)
+	for i := 0; i < len(fields); i++ {
+		// A rename is "R<similarity>\0old\0new"; every other change "X\0path".
+		if strings.HasPrefix(fields[i], "R") && i+2 < len(fields) {
+			renames[fields[i+1]] = fields[i+2]
+			i += 2
+			continue
+		}
+		i++
+	}
+	return renames, nil
+}
+
 // countLines counts lines the way git does, including a final line without
 // a newline.
 func countLines(source []byte) int {

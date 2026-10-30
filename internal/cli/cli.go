@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"path"
 	"time"
 
 	"github.com/umbralux1/entropic/internal/config"
@@ -107,10 +108,17 @@ func measure(dir, base string, cfg config.Config, stderr io.Writer) (scoring.Rep
 	if err != nil {
 		return scoring.Report{}, err
 	}
+	renames, err := revisions.Renames(dir, baseline.Commit)
+	if err != nil {
+		return scoring.Report{}, err
+	}
+	// Units are matched by path, so the Baseline is measured under today's
+	// names: a pure rename then has no Delta.
+	measuredBase := underCurrentNames(baseFiles, renames, inScope)
 	// Code that no longer parses is an error now, but at the Baseline it is
 	// history the change cannot fix, so it is skipped.
 	opts.SkipUnparsable = true
-	before, err := scoring.Measure(sourceFiles(baseFiles), opts)
+	before, err := scoring.Measure(sourceFiles(measuredBase), opts)
 	if err != nil {
 		return scoring.Report{}, fmt.Errorf("at Baseline %s: %w", baseline.Ref, err)
 	}
@@ -146,6 +154,24 @@ func changes(changed map[string]int, current, baseline []revisions.File) []scatt
 			continue
 		}
 		out = append(out, scatter.Change{Path: path, Module: scoring.ModuleOf(path), Lines: lines})
+	}
+	return out
+}
+
+// underCurrentNames returns files with each renamed one under its new path,
+// when the new path is measured and holds the same kind of code: same
+// language, and test or production as before.
+func underCurrentNames(files []revisions.File, renames map[string]string, inScope func(string) bool) []revisions.File {
+	out := make([]revisions.File, len(files))
+	for i, f := range files {
+		out[i] = f
+		to, ok := renames[f.Path]
+		if !ok || !inScope(to) || path.Ext(to) != path.Ext(f.Path) {
+			continue
+		}
+		if lang, _ := language.ForPath(f.Path); lang.IsTest(to) == lang.IsTest(f.Path) {
+			out[i].Path = to
+		}
 	}
 	return out
 }
