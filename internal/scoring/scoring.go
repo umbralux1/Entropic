@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/umbralux1/entropic/internal/analysis"
+	"github.com/umbralux1/entropic/internal/scatter"
 )
 
 // SourceFile is one file to measure. Path is slash-separated and relative to
@@ -36,6 +37,14 @@ type Report struct {
 	EntropyScore Figure            `json:"entropyScore"`
 	Signals      map[Signal]Figure `json:"signals"`
 	Units        []Unit            `json:"units"`
+	// Scatter is the Scatter of the change since the Baseline; nil for a snapshot.
+	Scatter *scatter.Scatter `json:"scatter,omitempty"`
+}
+
+// ModuleOf returns the Module a file belongs to: its directory, "." for the
+// repository root.
+func ModuleOf(file string) string {
+	return path.Dir(file)
 }
 
 // Figure is a repository-wide number and, when there is a Baseline, its Delta.
@@ -86,7 +95,7 @@ func Measure(files []SourceFile) (Report, error) {
 		if err != nil {
 			return Report{}, fmt.Errorf("%s: %w", f.Path, err)
 		}
-		module := path.Dir(f.Path)
+		module := ModuleOf(f.Path)
 		lines := bytes.Split(bytes.TrimSuffix(f.Source, []byte("\n")), []byte("\n"))
 		file := Unit{Kind: analysis.File, Name: f.Path, Path: f.Path, Module: module,
 			StartLine: 1, EndLine: len(lines), Lines: nonBlank(lines)}

@@ -85,6 +85,24 @@ type Report struct {
 	EntropyScore  ReportFigure            `json:"entropyScore"`
 	Signals       map[string]ReportFigure `json:"signals"`
 	Units         []ReportUnit            `json:"units"`
+	Scatter       *ReportScatter          `json:"scatter"`
+}
+
+// ReportScatter is the Scatter of the change between Baseline and current state.
+type ReportScatter struct {
+	Modules      int     `json:"modules"`
+	Budget       float64 `json:"budget"`
+	OverBudget   bool    `json:"overBudget"`
+	ChangedLines int     `json:"changedLines"`
+	// Informational values are reported but feed no Signal or Entropy Score.
+	Informational ReportScatterInformational `json:"informational"`
+}
+
+// ReportScatterInformational holds Scatter's informational values.
+type ReportScatterInformational struct {
+	Files            int     `json:"files"`
+	Entropy          float64 `json:"entropy"`
+	EffectiveModules float64 `json:"effectiveModules"`
 }
 
 // ReportBaseline is the Baseline a report was compared against.

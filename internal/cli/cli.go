@@ -10,6 +10,7 @@ import (
 	"github.com/umbralux1/entropic/internal/language"
 	"github.com/umbralux1/entropic/internal/reporters"
 	"github.com/umbralux1/entropic/internal/revisions"
+	"github.com/umbralux1/entropic/internal/scatter"
 	"github.com/umbralux1/entropic/internal/scoring"
 )
 
@@ -80,7 +81,22 @@ func measure(dir, base string) (scoring.Report, error) {
 	}
 	r := scoring.Compare(current, before)
 	r.Baseline = &scoring.Baseline{Ref: baseline.Ref, Commit: baseline.Commit}
+
+	changed, err := revisions.ChangedLines(dir, baseline.Commit, isSource)
+	if err != nil {
+		return scoring.Report{}, err
+	}
+	s := scatter.Measure(changes(changed))
+	r.Scatter = &s
 	return r, nil
+}
+
+func changes(changed map[string]int) []scatter.Change {
+	out := make([]scatter.Change, 0, len(changed))
+	for path, lines := range changed {
+		out = append(out, scatter.Change{Path: path, Module: scoring.ModuleOf(path), Lines: lines})
+	}
+	return out
 }
 
 func isSource(path string) bool {

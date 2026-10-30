@@ -56,3 +56,23 @@ func Grid(rows [][]int) {
 		}
 	}
 }
+
+func TestTextShowsScatterAgainstItsBudget(t *testing.T) {
+	repo := testrepo.New(t)
+	for _, m := range []string{"a", "b", "c", "d"} {
+		repo.Write(m+"/f.go", "package "+m+"\n\nfunc F() {}\n")
+	}
+	repo.Commit("add four Modules")
+	for _, m := range []string{"a", "b", "c", "d"} {
+		repo.Write(m+"/f.go", "package "+m+"\n\nfunc G() {}\n")
+	}
+
+	out := repo.Run("--format", "text").Text(0)
+
+	// 4 Modules for 8 changed lines; budget 1 + log2(1.8) = 1.85.
+	for _, want := range []string{"Scatter", "4 Modules", "budget 1.85", "over budget"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("text report lacks %q:\n%s", want, out)
+		}
+	}
+}

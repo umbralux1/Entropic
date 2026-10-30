@@ -40,6 +40,14 @@ func Text(w io.Writer, r scoring.Report) error {
 	for _, s := range signals {
 		fmt.Fprintf(&b, "%-14s %s\n", title(s), figure(r.Signals[scoring.Signal(s)]))
 	}
+	if s := r.Scatter; s != nil {
+		verdict := "within budget"
+		if s.OverBudget {
+			verdict = "over budget"
+		}
+		fmt.Fprintf(&b, "%-14s %d Modules, %d changed lines (budget %s, %s)\n",
+			"Scatter", s.Modules, s.ChangedLines, number(s.Budget), verdict)
+	}
 
 	b.WriteString("\nUnits\n")
 	tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
