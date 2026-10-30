@@ -6,7 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"time"
 
+	"github.com/umbralux1/entropic/internal/config"
 	"github.com/umbralux1/entropic/internal/language"
 	"github.com/umbralux1/entropic/internal/reporters"
 	"github.com/umbralux1/entropic/internal/revisions"
@@ -43,7 +45,15 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 		return ExitError
 	}
 
-	r, err := measure(dir, *base)
+	cfg, err := config.Load(dir)
+	if err != nil {
+		fmt.Fprintf(stderr, "entropic: %v\n", err)
+		return ExitError
+	}
+	r, err := measure(dir, *base, cfg)
+	if err == nil {
+		r, err = withHotspots(dir, r, cfg.ChurnWindowDays, signalWeights(cfg))
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
 		return ExitError
@@ -55,60 +65,95 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
+// withHotspots counts Churn over the last windowDays and ranks r's Hotspots.
+func withHotspots(dir string, r scoring.Report, windowDays int, weights map[scoring.Signal]float64) (scoring.Report, error) {
+	churn, err := revisions.Churn(dir, time.Now().AddDate(0, 0, -windowDays))
+	if err != nil {
+		return scoring.Report{}, err
+	}
+	return r.WithHotspots(churn, windowDays, weights), nil
+}
+
 // measure measures the working tree and, unless base is none, compares it
-// against the Baseline.
-func measure(dir, base string) (scoring.Report, error) {
+// against the Baseline. Both are measured with the current config, so the
+// Delta reflects the code alone.
+func measure(dir, base string, cfg config.Config) (scoring.Report, error) {
+	weights := signalWeights(cfg)
+	inScope := func(path string) bool {
+		lang, ok := language.ForPath(path)
+		return ok && !lang.Vendored(path) && !cfg.Excluded(path)
+	}
 	baseline, err := revisions.Resolve(dir, base)
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	files, err := revisions.WorkingTree(dir, isSource)
+	nowFiles, err := revisions.WorkingTree(dir, inScope)
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	current, err := scoring.Measure(sourceFiles(files))
+	current, err := scoring.Measure(sourceFiles(nowFiles), weights)
 	if err != nil || baseline == nil {
 		return current, err
 	}
 
-	files, err = revisions.AtCommit(dir, baseline.Commit, isSource)
+	baseFiles, err := revisions.AtCommit(dir, baseline.Commit, inScope)
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	before, err := scoring.Measure(sourceFiles(files))
+	before, err := scoring.Measure(sourceFiles(baseFiles), weights)
 	if err != nil {
 		return scoring.Report{}, fmt.Errorf("at Baseline %s: %w", baseline.Ref, err)
 	}
 	r := scoring.Compare(current, before)
 	r.Baseline = &scoring.Baseline{Ref: baseline.Ref, Commit: baseline.Commit}
 
-	changed, err := revisions.ChangedLines(dir, baseline.Commit, isSource)
+	changed, err := revisions.ChangedLines(dir, baseline.Commit, inScope)
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	s := scatter.Measure(changes(changed))
+	s := scatter.Measure(changes(changed, nowFiles, baseFiles))
 	r.Scatter = &s
 	return r, nil
 }
 
-func changes(changed map[string]int) []scatter.Change {
+// changes turns changed lines per file into Scatter's input, leaving out
+// files that are generated now or were at the Baseline.
+func changes(changed map[string]int, current, baseline []revisions.File) []scatter.Change {
+	generated := map[string]bool{}
+	for _, f := range append(append([]revisions.File(nil), current...), baseline...) {
+		lang, _ := language.ForPath(f.Path)
+		if lang.IsGenerated(f.Source) {
+			generated[f.Path] = true
+		}
+	}
 	out := make([]scatter.Change, 0, len(changed))
 	for path, lines := range changed {
+		if generated[path] {
+			continue
+		}
 		out = append(out, scatter.Change{Path: path, Module: scoring.ModuleOf(path), Lines: lines})
 	}
 	return out
 }
 
-func isSource(path string) bool {
-	_, ok := language.ForPath(path)
-	return ok
+// signalWeights is cfg's Signal weights keyed by Signal.
+func signalWeights(cfg config.Config) map[scoring.Signal]float64 {
+	weights := map[scoring.Signal]float64{}
+	for name, w := range cfg.Weights {
+		weights[scoring.Signal(name)] = w
+	}
+	return weights
 }
 
+// sourceFiles pairs each file with its language, leaving out generated code.
 func sourceFiles(files []revisions.File) []scoring.SourceFile {
-	out := make([]scoring.SourceFile, len(files))
-	for i, f := range files {
+	var out []scoring.SourceFile
+	for _, f := range files {
 		lang, _ := language.ForPath(f.Path)
-		out[i] = scoring.SourceFile{Path: f.Path, Source: f.Source, Language: lang}
+		if lang.IsGenerated(f.Source) {
+			continue
+		}
+		out = append(out, scoring.SourceFile{Path: f.Path, Source: f.Source, Language: lang, Test: lang.IsTest(f.Path)})
 	}
 	return out
 }

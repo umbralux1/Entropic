@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/umbralux1/entropic/internal/cli"
 )
@@ -70,6 +71,24 @@ func (r *Repo) Commit(message string) *Repo {
 	return r
 }
 
+// CommitDaysAgo stages everything and commits it with author and committer
+// dates set the given number of days before now.
+func (r *Repo) CommitDaysAgo(days int, message string) *Repo {
+	r.t.Helper()
+	date := time.Now().AddDate(0, 0, -days).Format(time.RFC3339)
+	r.git("add", "-A")
+	r.gitEnv([]string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date},
+		"commit", "-q", "-m", message)
+	return r
+}
+
+// Move renames a file in the working tree and stages the rename.
+func (r *Repo) Move(from, to string) *Repo {
+	r.t.Helper()
+	r.git("mv", from, to)
+	return r
+}
+
 // Result is what one entropic run produced.
 type Result struct {
 	t      *testing.T
@@ -78,14 +97,31 @@ type Result struct {
 	Stderr string
 }
 
-// Report is the JSON report as a consumer reads it.
+// Report is the JSON report as a consumer reads it. Its own figures and
+// Units are production code; Tests holds the same for test files.
 type Report struct {
-	SchemaVersion int                     `json:"schemaVersion"`
-	Baseline      *ReportBaseline         `json:"baseline"`
-	EntropyScore  ReportFigure            `json:"entropyScore"`
-	Signals       map[string]ReportFigure `json:"signals"`
-	Units         []ReportUnit            `json:"units"`
-	Scatter       *ReportScatter          `json:"scatter"`
+	SchemaVersion int             `json:"schemaVersion"`
+	Baseline      *ReportBaseline `json:"baseline"`
+	ReportGroup
+	Tests       *ReportGroup    `json:"tests"`
+	ChurnWindow int             `json:"churnWindowDays"`
+	Hotspots    []ReportHotspot `json:"hotspots"`
+	Scatter     *ReportScatter  `json:"scatter"`
+}
+
+// ReportGroup is the Entropy Score, Signals and Units of one group of files.
+type ReportGroup struct {
+	EntropyScore ReportFigure            `json:"entropyScore"`
+	Signals      map[string]ReportFigure `json:"signals"`
+	Units        []ReportUnit            `json:"units"`
+}
+
+// ReportHotspot is a file Unit ranked by entropy times Churn.
+type ReportHotspot struct {
+	Path    string  `json:"path"`
+	Churn   int     `json:"churn"`
+	Entropy float64 `json:"entropy"`
+	Score   float64 `json:"score"`
 }
 
 // ReportScatter is the Scatter of the change between Baseline and current state.
@@ -146,7 +182,7 @@ type ReportInformational struct {
 
 // Unit returns the Unit of the given kind and name, failing the test if
 // there is none.
-func (rep Report) Unit(t *testing.T, kind, name string) ReportUnit {
+func (rep ReportGroup) Unit(t *testing.T, kind, name string) ReportUnit {
 	t.Helper()
 	for _, u := range rep.Units {
 		if u.Kind == kind && u.Name == name {
@@ -158,7 +194,7 @@ func (rep Report) Unit(t *testing.T, kind, name string) ReportUnit {
 }
 
 // UnitsOfKind returns the Units of one kind, in report order.
-func (rep Report) UnitsOfKind(kind string) []ReportUnit {
+func (rep ReportGroup) UnitsOfKind(kind string) []ReportUnit {
 	var units []ReportUnit
 	for _, u := range rep.Units {
 		if u.Kind == kind {
@@ -246,9 +282,14 @@ func (r *Repo) Rev(ref string) string {
 
 func (r *Repo) git(args ...string) string {
 	r.t.Helper()
+	return r.gitEnv(nil, args...)
+}
+
+func (r *Repo) gitEnv(env []string, args ...string) string {
+	r.t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.Dir
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(append(os.Environ(), env...),
 		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
 		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
 		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
