@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/umbralux1/entropic/internal/duplication"
 	"github.com/umbralux1/entropic/internal/scoring"
 	"github.com/umbralux1/entropic/internal/signal"
 )
@@ -22,9 +23,10 @@ func JSON(w io.Writer, r scoring.Report) error {
 	return enc.Encode(r)
 }
 
-// Text writes r as a terminal-friendly report: the Baseline, the Entropy
-// Score and Signal summaries, then the Units; test files follow in a
-// section of their own. Threshold violations, if any, come first.
+// Text writes r as a terminal-friendly report holding what the JSON does:
+// the Baseline, Scatter, the Entropy Score and Signal summaries, the Units
+// and clone groups, and the Hotspots; test files follow in a section of
+// their own. Threshold violations, if any, come first.
 func Text(w io.Writer, r scoring.Report) error {
 	r = r.InSeverityOrder()
 	var b strings.Builder
@@ -40,12 +42,18 @@ func Text(w io.Writer, r scoring.Report) error {
 			}
 			fmt.Fprintf(&b, "Scatter: %d Modules, %d changed lines (budget %s, %s)\n",
 				s.Modules, s.ChangedLines, number(s.Budget), verdict)
+			fmt.Fprintf(&b, "  informational: %d files, Shannon entropy %s bits, %s effective Modules\n",
+				s.Informational.Files, number(s.Informational.ShannonEntropy), number(s.Informational.EffectiveModules))
+		}
+		if len(r.SkippedAtBaseline) > 0 {
+			fmt.Fprintf(&b, "Skipped at Baseline, not parsable: %s\n", strings.Join(r.SkippedAtBaseline, ", "))
 		}
 		b.WriteString("\n")
 	}
 	if err := group(&b, r.Group); err != nil {
 		return err
 	}
+	hotspots(&b, r.Hotspots, r.ChurnWindowDays)
 	// A group without files still has its repository Unit.
 	if len(r.Tests.Units) > 1 {
 		b.WriteString("\nTests\n\n")
@@ -93,7 +101,41 @@ func group(b *strings.Builder, g scoring.Group) error {
 		}
 		fmt.Fprintf(tw, "%s\n", u.Status)
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	cloneGroups(b, g.CloneGroups)
+	return nil
+}
+
+// cloneGroups writes every location of each clone group, marking the original.
+func cloneGroups(b *strings.Builder, groups []duplication.CloneGroup) {
+	if len(groups) == 0 {
+		return
+	}
+	b.WriteString("\nClone groups\n")
+	for i, g := range groups {
+		fmt.Fprintf(b, "  %d.", i+1)
+		for _, l := range g.Locations {
+			fmt.Fprintf(b, " %s", l.Location)
+			if l.Original {
+				b.WriteString(" (original)")
+			}
+		}
+		b.WriteString("\n")
+	}
+}
+
+// hotspots writes the Hotspots, highest score first.
+func hotspots(b *strings.Builder, hs []scoring.Hotspot, windowDays int) {
+	if len(hs) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "\nHotspots (Churn over %d days)\n", windowDays)
+	for _, h := range hs {
+		fmt.Fprintf(b, "  %s %s: weighted total %s, churn %d, score %s\n",
+			h.Kind, h.Location, number(h.WeightedTotal), h.Churn, number(h.Score))
+	}
 }
 
 func figure(f scoring.Figure) string {
