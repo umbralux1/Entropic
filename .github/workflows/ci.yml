@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Baseline and Churn need history
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - name: vet
+        run: go vet ./...
+
+      - name: lint
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./...
+
+      - name: test
+        run: go test ./...
+
+      - name: dogfood
+        # Entropic must measure its own repository: exit 0 or 1, never 2.
+        run: |
+          set +e
+          go run ./cmd/entropic --base none --format json > /dev/null
+          code=$?
+          [ "$code" -lt 2 ] || { echo "entropic failed on its own repo (exit $code)"; exit 1; }

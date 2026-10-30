@@ -1,3 +1,7 @@
+## Testing
+
+Test at the two seams in `CODING_STANDARDS.md`: Seam 1 through `internal/testrepo`, Seam 2 through `analysis.Analyze`.
+
 ## Agent skills
 
 ### Issue tracker

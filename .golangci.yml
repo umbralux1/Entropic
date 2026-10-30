@@ -1,0 +1,23 @@
+version: "2"
+
+linters:
+  enable:
+    - depguard
+    - errorlint
+  settings:
+    errcheck:
+      exclude-functions:
+        # Diagnostics to stderr: nothing useful to do if writing them fails.
+        - fmt.Fprintf
+    depguard:
+      rules:
+        language-adapters:
+          # Language knowledge lives only in adapters; everything else picks a
+          # language through internal/language (ADR 0001). Seam 2 tests are
+          # per-language by design.
+          files:
+            - "!**/internal/language/**"
+            - "!$test"
+          deny:
+            - pkg: "github.com/umbralux1/entropic/internal/language/"
+              desc: "use internal/language.ForPath instead of a specific language adapter"
