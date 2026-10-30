@@ -211,3 +211,47 @@ func TestDefaultBaseInRepoWithoutCommitsIsASnapshot(t *testing.T) {
 		t.Errorf("repository Complexity: want 4, got %d", got)
 	}
 }
+
+func TestDeletingOneOfTwoSameNamedMethodsMarksOnlyThatMethodRemoved(t *testing.T) {
+	repo := testrepo.New(t).Write("shapes/shapes.go", `package shapes
+
+type A struct{}
+
+func (A) M() int {
+	return 1
+}
+
+type B struct{}
+
+func (*B) M() int {
+	if true {
+		return 2
+	}
+	return 0
+}
+`).Commit("add shapes").Write("shapes/shapes.go", `package shapes
+
+type A struct{}
+
+type B struct{}
+
+func (*B) M() int {
+	if true {
+		return 2
+	}
+	return 0
+}
+`)
+
+	r := repo.Run("--format", "json").Report(0)
+
+	if a := r.Unit(t, "function", "A.M"); a.Status != "removed" {
+		t.Errorf("A.M: want removed, got %+v", a)
+	}
+	if b := r.Unit(t, "function", "B.M"); b.Status != "unchanged" {
+		t.Errorf("B.M: want unchanged, got %+v", b)
+	}
+	if fns := r.UnitsOfKind("function"); len(fns) != 2 {
+		t.Errorf("want exactly A.M and B.M, got %+v", fns)
+	}
+}
