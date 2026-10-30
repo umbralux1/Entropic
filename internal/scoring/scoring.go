@@ -12,6 +12,7 @@ import (
 	"github.com/umbralux1/entropic/internal/analysis"
 	"github.com/umbralux1/entropic/internal/duplication"
 	"github.com/umbralux1/entropic/internal/scatter"
+	"github.com/umbralux1/entropic/internal/signal"
 )
 
 // SourceFile is one file to measure. Path is slash-separated and relative to
@@ -54,9 +55,9 @@ type Report struct {
 // repository Unit.
 type Group struct {
 	// EntropyScore is the weighted Signal total per 100 non-blank lines.
-	EntropyScore Figure            `json:"entropyScore"`
-	Signals      map[Signal]Figure `json:"signals"`
-	Units        []Unit            `json:"units"`
+	EntropyScore Figure                   `json:"entropyScore"`
+	Signals      map[signal.Signal]Figure `json:"signals"`
+	Units        []Unit                   `json:"units"`
 	// CloneGroups are the structural clones found by Duplication.
 	CloneGroups []duplication.CloneGroup `json:"cloneGroups"`
 }
@@ -108,7 +109,7 @@ const schemaVersion = 1
 // Options configure a measurement.
 type Options struct {
 	// Weights weigh each Signal in the Entropy Score.
-	Weights map[Signal]float64
+	Weights map[signal.Signal]float64
 	// DuplicateMinLines is the smallest clone reported, in lines holding code.
 	DuplicateMinLines int
 	// SkipUnparsable leaves out files that fail to parse, as Compare then
@@ -174,7 +175,7 @@ func analyse(f SourceFile, duplicateMinLines int) (analysedFile, error) {
 
 // measureGroup returns the Units of files: functions, then classes, then
 // files, then Modules, then the repository. Clones are sought within the group.
-func measureGroup(analysed []analysedFile, weights map[Signal]float64, existed duplication.Existed) Group {
+func measureGroup(analysed []analysedFile, weights map[signal.Signal]float64, existed duplication.Existed) Group {
 	fragments := map[string][]analysis.Fragment{}
 	for _, f := range analysed {
 		fragments[f.Path] = f.fragments
@@ -189,22 +190,22 @@ func measureGroup(analysed []analysedFile, weights map[Signal]float64, existed d
 		module := ModuleOf(f.Path)
 		file := Unit{Kind: analysis.File, Name: f.Path, Path: f.Path, Module: module,
 			StartLine: 1, EndLine: len(f.lines), Lines: nonBlank(f.lines),
-			Values: Values{Duplication: f.duplicated(cloned[f.Path], 1, len(f.lines))}}
+			Values: Values{signal.Duplication: f.duplicated(cloned[f.Path], 1, len(f.lines))}}
 		for _, u := range f.units {
 			unit := Unit{
 				Kind: u.Kind, Name: u.Name, Path: f.Path, Module: module,
 				StartLine: u.StartLine, EndLine: u.EndLine,
 				Lines: nonBlank(f.lines[u.StartLine-1 : u.EndLine]),
 				Values: Values{
-					Complexity:  u.Complexity,
-					Duplication: f.duplicated(cloned[f.Path], u.StartLine, u.EndLine),
+					signal.Complexity:  u.Complexity,
+					signal.Duplication: f.duplicated(cloned[f.Path], u.StartLine, u.EndLine),
 				},
 			}
 			// A class already rolls up the functions it encloses, so only
 			// functions roll up into the file.
 			if u.Kind == analysis.Function {
 				unit.Informational = &Informational{Cyclomatic: u.Cyclomatic}
-				file.Values[Complexity] += u.Complexity
+				file.Values[signal.Complexity] += u.Complexity
 				functions = append(functions, unit)
 			} else {
 				classes = append(classes, unit)
@@ -232,8 +233,8 @@ func measureGroup(analysed []analysedFile, weights map[Signal]float64, existed d
 	}
 	units = append(units, repo)
 
-	signals := map[Signal]Figure{}
-	for _, s := range Signals {
+	signals := map[signal.Signal]Figure{}
+	for _, s := range signal.OfCode {
 		signals[s] = Figure{Value: float64(repo.Values[s])}
 	}
 	return Group{
@@ -285,7 +286,7 @@ func clonedLines(groups []duplication.CloneGroup) map[string]map[int]bool {
 
 // entropyScore weights each Signal and normalises by code size, so that
 // adding code alone does not raise the score.
-func entropyScore(repo Unit, weights map[Signal]float64) float64 {
+func entropyScore(repo Unit, weights map[signal.Signal]float64) float64 {
 	if repo.Lines == 0 {
 		return 0
 	}

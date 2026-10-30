@@ -172,6 +172,21 @@ func TestEntropyScoreRiseOverThresholdNamesFunctionsThatGainedComplexity(t *test
 	}
 }
 
+func TestSettingOneThresholdKeepsTheOthersDefaults(t *testing.T) {
+	repo := testrepo.New(t).
+		Write("calc/calc.go", calcGo).
+		Write("entropic.toml", "[thresholds]\ncomplexity = 100\n").
+		Commit("add calc").
+		Write("calc/calc.go", signDeep)
+
+	r := repo.Run().Report(1)
+
+	// The Entropy Score rises by 31.52 (as above), over its default limit of 10.
+	if v := r.Violation(t, "entropyScore"); v.Limit != 10 {
+		t.Errorf("entropyScore violation: want the default limit 10, got %+v", v)
+	}
+}
+
 func TestSnapshotExceedsNoThresholdEvenWhenStrict(t *testing.T) {
 	repo := testrepo.New(t).
 		Write("calc/calc.go", signDeep).

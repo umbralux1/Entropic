@@ -9,10 +9,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/umbralux1/entropic/internal/signal"
 )
 
 // FileName is the config file Entropic looks for at the repository root.
@@ -20,8 +22,8 @@ const FileName = "entropic.toml"
 
 // Config is what a run is configured with.
 type Config struct {
-	// Weights weigh each Signal, by name, in the Entropy Score.
-	Weights map[string]float64 `toml:"weights"`
+	// Weights weigh each Signal of code in the Entropy Score.
+	Weights map[signal.Signal]float64 `toml:"weights"`
 	// Exclude lists slash-separated glob patterns (path.Match syntax) of
 	// paths not to measure. A pattern matching a directory excludes
 	// everything below it.
@@ -30,32 +32,29 @@ type Config struct {
 	ChurnWindowDays int `toml:"churn_window_days"`
 	// DuplicateMinLines is the smallest duplicate worth reporting.
 	DuplicateMinLines int `toml:"duplicate_min_lines"`
-	// Thresholds bound how much a change may raise entropy.
-	Thresholds Thresholds `toml:"thresholds"`
-}
-
-// Thresholds bound the Delta of a change; exceeding any is a violation.
-type Thresholds struct {
-	// Complexity is the most Complexity any one function may gain.
-	Complexity float64 `toml:"complexity"`
-	// Duplication is the most duplicated lines any one file may gain.
-	Duplication float64 `toml:"duplication"`
-	// EntropyScore is the most the Entropy Score may rise.
-	EntropyScore float64 `toml:"entropy_score"`
-	// Scatter is how many Modules a change may touch beyond its Scatter Budget.
-	Scatter float64 `toml:"scatter"`
+	// Thresholds are the limit of each threshold, keyed by its
+	// entropic.toml key (signal.Threshold.Key).
+	Thresholds map[string]float64 `toml:"thresholds"`
 }
 
 // Default is the configuration used when there is no config file. Values
 // are provisional until tuned on real repositories.
 func Default() Config {
+	thresholds := map[string]float64{}
+	for _, t := range signal.Thresholds {
+		thresholds[t.Key] = t.DefaultLimit
+	}
 	return Config{
-		// A duplicated line weighs a tenth of a Complexity point.
-		Weights:           map[string]float64{"complexity": 1, "duplication": 0.1},
+		Weights:           signal.DefaultWeights(),
 		ChurnWindowDays:   90,
 		DuplicateMinLines: 6,
-		Thresholds:        Thresholds{Complexity: 10, Duplication: 20, EntropyScore: 10, Scatter: 0},
+		Thresholds:        thresholds,
 	}
+}
+
+// Limit is how far a change may go before exceeding threshold t.
+func (c Config) Limit(t signal.Threshold) float64 {
+	return c.Thresholds[t.Key]
 }
 
 // Load reads FileName from the repository at dir, merged over the defaults,
@@ -87,10 +86,9 @@ func validate(cfg Config, meta toml.MetaData) error {
 		}
 		return fmt.Errorf("unknown key %s", strings.Join(keys, ", "))
 	}
-	known := Default().Weights
 	for name, w := range cfg.Weights {
-		if _, ok := known[name]; !ok {
-			return fmt.Errorf("weights: unknown Signal %q (known: %s)", name, strings.Join(sortedKeys(known), ", "))
+		if !slices.Contains(signal.OfCode, name) {
+			return fmt.Errorf("weights: unknown Signal %q (known: %s)", name, joined(signal.OfCode, func(s signal.Signal) string { return string(s) }))
 		}
 		if w < 0 {
 			return fmt.Errorf("weights: %s must not be negative, got %v", name, w)
@@ -104,14 +102,13 @@ func validate(cfg Config, meta toml.MetaData) error {
 	if cfg.ChurnWindowDays <= 0 {
 		return fmt.Errorf("churn_window_days must be positive, got %d", cfg.ChurnWindowDays)
 	}
-	for name, limit := range map[string]float64{
-		"complexity":    cfg.Thresholds.Complexity,
-		"duplication":   cfg.Thresholds.Duplication,
-		"entropy_score": cfg.Thresholds.EntropyScore,
-		"scatter":       cfg.Thresholds.Scatter,
-	} {
+	for key, limit := range cfg.Thresholds {
+		known := slices.ContainsFunc(signal.Thresholds, func(t signal.Threshold) bool { return t.Key == key })
+		if !known {
+			return fmt.Errorf("thresholds: unknown threshold %q (known: %s)", key, joined(signal.Thresholds, func(t signal.Threshold) string { return t.Key }))
+		}
 		if limit < 0 {
-			return fmt.Errorf("thresholds: %s must not be negative, got %v", name, limit)
+			return fmt.Errorf("thresholds: %s must not be negative, got %v", key, limit)
 		}
 	}
 	if cfg.DuplicateMinLines <= 0 {
@@ -133,11 +130,11 @@ func (c Config) Excluded(p string) bool {
 	return false
 }
 
-func sortedKeys(m map[string]float64) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+// joined lists the names of items, comma-separated.
+func joined[T any](items []T, name func(T) string) string {
+	names := make([]string, len(items))
+	for i, item := range items {
+		names[i] = name(item)
 	}
-	sort.Strings(keys)
-	return keys
+	return strings.Join(names, ", ")
 }

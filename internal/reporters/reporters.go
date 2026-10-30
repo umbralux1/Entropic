@@ -12,6 +12,7 @@ import (
 
 	"github.com/umbralux1/entropic/internal/analysis"
 	"github.com/umbralux1/entropic/internal/scoring"
+	"github.com/umbralux1/entropic/internal/signal"
 )
 
 // JSON writes r as the versioned JSON report.
@@ -79,14 +80,14 @@ func group(b *strings.Builder, g scoring.Group) error {
 	}
 	sort.Strings(signals)
 	for _, s := range signals {
-		fmt.Fprintf(b, "%-14s %s\n", title(s), figure(g.Signals[scoring.Signal(s)]))
+		fmt.Fprintf(b, "%-14s %s\n", title(s), figure(g.Signals[signal.Signal(s)]))
 	}
 
 	b.WriteString("\nUnits\n")
 	tw := tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
 	for _, u := range bySeverity(g.Units) {
 		fmt.Fprintf(tw, "  %s\t%s\t%s\t", u.Kind, u.Name, location(u))
-		for _, s := range scoring.Signals {
+		for _, s := range signal.OfCode {
 			fmt.Fprintf(tw, "%s %s\t", s, unitValue(u, s))
 		}
 		fmt.Fprintf(tw, "%s\n", u.Status)
@@ -121,7 +122,7 @@ func bySeverity(units []scoring.Unit) []scoring.Unit {
 // compareValues orders Values by each Signal in reporting order: positive
 // when a is larger, negative when b is, zero when equal.
 func compareValues(a, b scoring.Values) int {
-	for _, s := range scoring.Signals {
+	for _, s := range signal.OfCode {
 		if a[s] != b[s] {
 			return a[s] - b[s]
 		}
@@ -154,7 +155,7 @@ func number(v float64) string {
 	return strings.TrimSuffix(s, ".")
 }
 
-func unitValue(u scoring.Unit, s scoring.Signal) string {
+func unitValue(u scoring.Unit, s signal.Signal) string {
 	if u.Delta == nil {
 		return fmt.Sprint(u.Values[s])
 	}

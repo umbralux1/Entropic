@@ -16,6 +16,7 @@ import (
 	"github.com/umbralux1/entropic/internal/revisions"
 	"github.com/umbralux1/entropic/internal/scatter"
 	"github.com/umbralux1/entropic/internal/scoring"
+	"github.com/umbralux1/entropic/internal/signal"
 )
 
 // Exit codes.
@@ -55,13 +56,13 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 	}
 	r, err := measure(dir, *base, cfg, stderr)
 	if err == nil {
-		r, err = withHotspots(dir, r, cfg.ChurnWindowDays, signalWeights(cfg))
+		r, err = withHotspots(dir, r, cfg.ChurnWindowDays, cfg.Weights)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
 		return ExitError
 	}
-	r.Violations = policy.Evaluate(r, cfg.Thresholds)
+	r.Violations = policy.Evaluate(r, cfg.Limit)
 	if err := render(stdout, r); err != nil {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
 		return ExitError
@@ -73,7 +74,7 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 }
 
 // withHotspots counts Churn over the last windowDays and ranks r's Hotspots.
-func withHotspots(dir string, r scoring.Report, windowDays int, weights map[scoring.Signal]float64) (scoring.Report, error) {
+func withHotspots(dir string, r scoring.Report, windowDays int, weights map[signal.Signal]float64) (scoring.Report, error) {
 	churn, err := revisions.Churn(dir, time.Now().AddDate(0, 0, -windowDays))
 	if err != nil {
 		return scoring.Report{}, err
@@ -89,7 +90,7 @@ func measure(dir, base string, cfg config.Config, stderr io.Writer) (scoring.Rep
 		lang, ok := language.ForPath(p)
 		return ok && !lang.Vendored(p) && !cfg.Excluded(p)
 	}
-	opts := scoring.Options{Weights: signalWeights(cfg), DuplicateMinLines: cfg.DuplicateMinLines}
+	opts := scoring.Options{Weights: cfg.Weights, DuplicateMinLines: cfg.DuplicateMinLines}
 	baseline, err := revisions.Resolve(dir, base)
 	if err != nil {
 		return scoring.Report{}, err
@@ -185,15 +186,6 @@ func underCurrentNames(files []revisions.File, renames map[string]string, inScop
 		}
 	}
 	return out
-}
-
-// signalWeights is cfg's Signal weights keyed by Signal.
-func signalWeights(cfg config.Config) map[scoring.Signal]float64 {
-	weights := map[scoring.Signal]float64{}
-	for name, w := range cfg.Weights {
-		weights[scoring.Signal(name)] = w
-	}
-	return weights
 }
 
 // sourceFiles pairs each file with its language, leaving out generated code.

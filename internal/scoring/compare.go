@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/umbralux1/entropic/internal/analysis"
+	"github.com/umbralux1/entropic/internal/signal"
 )
 
 // Status says how a Unit differs from its counterpart at the Baseline.
@@ -43,7 +44,7 @@ func compareGroup(current, baseline Group) Group {
 
 	out := current
 	out.EntropyScore = withDelta(current.EntropyScore, baseline.EntropyScore)
-	out.Signals = map[Signal]Figure{}
+	out.Signals = map[signal.Signal]Figure{}
 	for s, f := range current.Signals {
 		out.Signals[s] = withDelta(f, baseline.Signals[s])
 	}
