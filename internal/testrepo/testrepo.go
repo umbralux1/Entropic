@@ -106,6 +106,7 @@ type Report struct {
 	Tests       *ReportGroup    `json:"tests"`
 	ChurnWindow int             `json:"churnWindowDays"`
 	Hotspots    []ReportHotspot `json:"hotspots"`
+	Scatter     *ReportScatter  `json:"scatter"`
 }
 
 // ReportGroup is the Entropy Score, Signals and Units of one group of files.
@@ -121,6 +122,23 @@ type ReportHotspot struct {
 	Churn   int     `json:"churn"`
 	Entropy float64 `json:"entropy"`
 	Score   float64 `json:"score"`
+}
+
+// ReportScatter is the Scatter of the change between Baseline and current state.
+type ReportScatter struct {
+	Modules      int     `json:"modules"`
+	Budget       float64 `json:"budget"`
+	OverBudget   bool    `json:"overBudget"`
+	ChangedLines int     `json:"changedLines"`
+	// Informational values are reported but feed no Signal or Entropy Score.
+	Informational ReportScatterInformational `json:"informational"`
+}
+
+// ReportScatterInformational holds Scatter's informational values.
+type ReportScatterInformational struct {
+	Files            int     `json:"files"`
+	Entropy          float64 `json:"entropy"`
+	EffectiveModules float64 `json:"effectiveModules"`
 }
 
 // ReportBaseline is the Baseline a report was compared against.

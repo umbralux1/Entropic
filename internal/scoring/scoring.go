@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/umbralux1/entropic/internal/analysis"
+	"github.com/umbralux1/entropic/internal/scatter"
 )
 
 // SourceFile is one file to measure. Path is slash-separated and relative to
@@ -37,6 +38,9 @@ type Report struct {
 	ChurnWindowDays int `json:"churnWindowDays"`
 	// Hotspots rank production file Units by entropy times Churn.
 	Hotspots []Hotspot `json:"hotspots"`
+	// Scatter is the Scatter of the change since the Baseline, test files
+	// included; nil for a snapshot.
+	Scatter *scatter.Scatter `json:"scatter,omitempty"`
 }
 
 // Group is the measurement of one group of files, rolled up to its own
@@ -46,6 +50,12 @@ type Group struct {
 	EntropyScore Figure            `json:"entropyScore"`
 	Signals      map[Signal]Figure `json:"signals"`
 	Units        []Unit            `json:"units"`
+}
+
+// ModuleOf returns the Module a file belongs to: its directory, "." for the
+// repository root.
+func ModuleOf(file string) string {
+	return path.Dir(file)
 }
 
 // Figure is a repository-wide number and, when there is a Baseline, its Delta.
@@ -118,7 +128,7 @@ func measureGroup(files []SourceFile, weights map[Signal]float64) (Group, error)
 		if err != nil {
 			return Group{}, fmt.Errorf("%s: %w", f.Path, err)
 		}
-		module := path.Dir(f.Path)
+		module := ModuleOf(f.Path)
 		lines := bytes.Split(bytes.TrimSuffix(f.Source, []byte("\n")), []byte("\n"))
 		file := Unit{Kind: analysis.File, Name: f.Path, Path: f.Path, Module: module,
 			StartLine: 1, EndLine: len(lines), Lines: nonBlank(lines)}

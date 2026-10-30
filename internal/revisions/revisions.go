@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -120,6 +121,57 @@ func AtCommit(dir, commit string, want func(path string) bool) ([]File, error) {
 		files = append(files, File{Path: path, Source: source})
 	}
 	return files, nil
+}
+
+// ChangedLines returns, per file want accepts, how many lines were added
+// plus deleted between commit and the working tree, untracked files
+// included. A renamed file counts as deleted at its old path and added at
+// its new one.
+func ChangedLines(dir, commit string, want func(path string) bool) (map[string]int, error) {
+	out, err := git(dir, "diff", "--numstat", "-z", "--no-renames", commit, "--")
+	if err != nil {
+		return nil, fmt.Errorf("diff against %s: %w", commit, err)
+	}
+	changed := map[string]int{}
+	for _, record := range splitNUL(out) {
+		// Each record is "added\tdeleted\tpath"; binary files show "-".
+		fields := strings.SplitN(record, "\t", 3)
+		if len(fields) != 3 || !want(fields[2]) {
+			continue
+		}
+		added, errA := strconv.Atoi(fields[0])
+		deleted, errD := strconv.Atoi(fields[1])
+		if errA != nil || errD != nil {
+			continue
+		}
+		changed[fields[2]] += added + deleted
+	}
+
+	out, err = git(dir, "ls-files", "-z", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, fmt.Errorf("list untracked files: %w", err)
+	}
+	for _, path := range splitNUL(out) {
+		if !want(path) {
+			continue
+		}
+		source, err := os.ReadFile(filepath.Join(dir, path))
+		if err != nil {
+			return nil, err
+		}
+		changed[path] += countLines(source)
+	}
+	return changed, nil
+}
+
+// countLines counts lines the way git does, including a final line without
+// a newline.
+func countLines(source []byte) int {
+	n := bytes.Count(source, []byte("\n"))
+	if len(source) > 0 && source[len(source)-1] != '\n' {
+		n++
+	}
+	return n
 }
 
 // Churn counts, per file path at HEAD, the non-merge commits reachable from
