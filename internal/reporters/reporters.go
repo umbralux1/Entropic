@@ -23,9 +23,10 @@ func JSON(w io.Writer, r scoring.Report) error {
 
 // Text writes r as a terminal-friendly report: the Baseline, the Entropy
 // Score and Signal summaries, then the Units; test files follow in a
-// section of their own.
+// section of their own. Threshold violations, if any, come first.
 func Text(w io.Writer, r scoring.Report) error {
 	var b strings.Builder
+	violations(&b, r.Violations)
 	if r.Baseline == nil {
 		b.WriteString("Snapshot (no Baseline)\n\n")
 	} else {
@@ -52,6 +53,21 @@ func Text(w io.Writer, r scoring.Report) error {
 	}
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// violations writes each exceeded threshold with the Units responsible.
+func violations(b *strings.Builder, vs []scoring.Violation) {
+	if len(vs) == 0 {
+		return
+	}
+	b.WriteString("Threshold exceeded\n")
+	for _, v := range vs {
+		fmt.Fprintf(b, "  %s +%s > %s\n", v.Threshold, number(v.Value), number(v.Limit))
+		for _, u := range v.Units {
+			fmt.Fprintf(b, "    %s %s %s\n", u.Kind, u.Name, location(scoring.Unit{Path: u.Path, StartLine: u.StartLine, EndLine: u.EndLine}))
+		}
+	}
+	b.WriteString("\n")
 }
 
 // group writes one group's Entropy Score, Signal summaries and Units.

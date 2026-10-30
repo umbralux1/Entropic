@@ -81,7 +81,7 @@ func TestTextShowsScatterAgainstItsBudget(t *testing.T) {
 		repo.Write(m+"/f.go", "package "+m+"\n\nfunc G() {}\n")
 	}
 
-	out := repo.Run("--format", "text").Text(0)
+	out := repo.Run("--format", "text").Text(1)
 
 	// 4 Modules for 8 changed lines; budget 1 + log2(1.8) = 1.85.
 	for _, want := range []string{"Scatter", "4 Modules", "budget 1.85", "over budget"} {

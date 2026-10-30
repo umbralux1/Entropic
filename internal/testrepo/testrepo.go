@@ -103,10 +103,39 @@ type Report struct {
 	SchemaVersion int             `json:"schemaVersion"`
 	Baseline      *ReportBaseline `json:"baseline"`
 	ReportGroup
-	Tests       *ReportGroup    `json:"tests"`
-	ChurnWindow int             `json:"churnWindowDays"`
-	Hotspots    []ReportHotspot `json:"hotspots"`
-	Scatter     *ReportScatter  `json:"scatter"`
+	Tests       *ReportGroup      `json:"tests"`
+	ChurnWindow int               `json:"churnWindowDays"`
+	Hotspots    []ReportHotspot   `json:"hotspots"`
+	Scatter     *ReportScatter    `json:"scatter"`
+	Violations  []ReportViolation `json:"violations"`
+}
+
+// ReportViolation is a threshold the change exceeded and the Units responsible.
+type ReportViolation struct {
+	Threshold string          `json:"threshold"`
+	Limit     float64         `json:"limit"`
+	Value     float64         `json:"value"`
+	Units     []ReportUnitRef `json:"units"`
+}
+
+// ReportUnitRef names a Unit responsible for a violation.
+type ReportUnitRef struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// Violation returns the violation of the named threshold, failing the test
+// if there is none.
+func (rep Report) Violation(t *testing.T, threshold string) ReportViolation {
+	t.Helper()
+	for _, v := range rep.Violations {
+		if v.Threshold == threshold {
+			return v
+		}
+	}
+	t.Fatalf("no %s violation in %+v", threshold, rep.Violations)
+	return ReportViolation{}
 }
 
 // ReportGroup is the Entropy Score, Signals, Units and clone groups of one
