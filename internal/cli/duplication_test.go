@@ -39,6 +39,41 @@ func TestCopiedFunctionWithRenamedIdentifiersIsAClone(t *testing.T) {
 	}
 }
 
+func TestCopiedPythonFunctionWithRenamedIdentifiersIsAClone(t *testing.T) {
+	repo := testrepo.New(t).
+		Write("calc/calc.py", `def sign(x):
+    if x > 0:
+        return 1
+    return 0
+
+
+def sum_positive(xs):
+    total = 0
+    for x in xs:
+        if x > 0:
+            total += x
+    return total
+`). // sum_positive: lines 7-12
+		Write("stats/stats.py", `def count_above(values):
+    n = 10
+    for v in values:
+        if v > 3:
+            n += v
+    return n
+`). // sum_positive renamed, literals changed: lines 1-6
+		Commit("copy sum_positive")
+
+	r := repo.Run("--base", "none", "--format", "json").Report(0)
+
+	want := []testrepo.ReportCloneGroup{{Locations: []testrepo.ReportLocation{
+		{Path: "calc/calc.py", StartLine: 7, EndLine: 12},
+		{Path: "stats/stats.py", StartLine: 1, EndLine: 6},
+	}}}
+	if !reflect.DeepEqual(r.CloneGroups, want) {
+		t.Errorf("clone groups: want %+v, got %+v", want, r.CloneGroups)
+	}
+}
+
 func TestCloneGroupListsEveryLocation(t *testing.T) {
 	repo := testrepo.New(t).
 		Write("calc/calc.go", calcGo). // SumPositive: lines 10-18
