@@ -39,7 +39,7 @@ var Language = analysis.Language{
 		"interpreted_string_literal": true,
 		"raw_string_literal":         true,
 	},
-	Unduplicable: map[string]bool{
+	IgnoredByDuplication: map[string]bool{
 		"import_declaration": true,
 		"comment":            true,
 	},

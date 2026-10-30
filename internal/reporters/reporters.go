@@ -65,7 +65,7 @@ func violations(b *strings.Builder, vs []scoring.Violation) {
 	for _, v := range vs {
 		fmt.Fprintf(b, "  %s +%s > %s\n", v.Threshold, number(v.Value), number(v.Limit))
 		for _, u := range v.Units {
-			fmt.Fprintf(b, "    %s %s %s\n", u.Kind, u.Name, location(scoring.Unit{Path: u.Path, StartLine: u.StartLine, EndLine: u.EndLine}))
+			fmt.Fprintf(b, "    %s %s %s\n", u.Kind, u.Name, u.Location)
 		}
 	}
 	b.WriteString("\n")
@@ -86,7 +86,7 @@ func group(b *strings.Builder, g scoring.Group) error {
 	b.WriteString("\nUnits\n")
 	tw := tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
 	for _, u := range bySeverity(g.Units) {
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t", u.Kind, u.Name, location(u))
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t", u.Kind, u.Name, u.Location)
 		for _, s := range signal.OfCode {
 			fmt.Fprintf(tw, "%s %s\t", s, unitValue(u, s))
 		}
@@ -160,15 +160,6 @@ func unitValue(u scoring.Unit, s signal.Signal) string {
 		return fmt.Sprint(u.Values[s])
 	}
 	return fmt.Sprintf("%d (%+d)", u.Values[s], u.Delta.Values[s])
-}
-
-// location is where a Unit lives: path and line range for functions and
-// files, the path alone for Modules, and nothing for the repository.
-func location(u scoring.Unit) string {
-	if u.StartLine == 0 {
-		return u.Path
-	}
-	return fmt.Sprintf("%s:%d-%d", u.Path, u.StartLine, u.EndLine)
 }
 
 func title(s string) string {

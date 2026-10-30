@@ -63,9 +63,9 @@ func TestScatterReportsFilesTouchedAndShannonEntropyAsInformational(t *testing.T
 		t.Fatalf("want Scatter, got none")
 	}
 	info := s.Informational
-	if info.Files != 3 || math.Abs(info.Entropy-0.8112781244591328) > 1e-9 ||
+	if info.Files != 3 || math.Abs(info.ShannonEntropy-0.8112781244591328) > 1e-9 ||
 		math.Abs(info.EffectiveModules-1.7547653506033232) > 1e-9 {
-		t.Errorf("informational: want 3 files, entropy 0.8113, 2^H 1.7548; got %+v", info)
+		t.Errorf("informational: want 3 files, Shannon entropy 0.8113, 2^H 1.7548; got %+v", info)
 	}
 }
 

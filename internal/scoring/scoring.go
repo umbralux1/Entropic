@@ -11,6 +11,7 @@ import (
 
 	"github.com/umbralux1/entropic/internal/analysis"
 	"github.com/umbralux1/entropic/internal/duplication"
+	"github.com/umbralux1/entropic/internal/revisions"
 	"github.com/umbralux1/entropic/internal/scatter"
 	"github.com/umbralux1/entropic/internal/signal"
 )
@@ -29,7 +30,7 @@ type SourceFile struct {
 type Report struct {
 	SchemaVersion int `json:"schemaVersion"`
 	// Baseline is nil for a snapshot.
-	Baseline *Baseline `json:"baseline"`
+	Baseline *revisions.Baseline `json:"baseline"`
 	// SkippedAtBaseline are the files left out of the Baseline because they
 	// failed to parse there; empty for a snapshot.
 	SkippedAtBaseline []string `json:"skippedAtBaseline"`
@@ -37,7 +38,7 @@ type Report struct {
 	Tests Group `json:"tests"`
 	// ChurnWindowDays is the history window Hotspot Churn was counted over.
 	ChurnWindowDays int `json:"churnWindowDays"`
-	// Hotspots rank production file Units by entropy times Churn.
+	// Hotspots rank production file Units by weighted Signal total times Churn.
 	Hotspots []Hotspot `json:"hotspots"`
 	// Scatter is the Scatter of the change since the Baseline in production
 	// code; nil for a snapshot.
@@ -74,21 +75,13 @@ type Figure struct {
 	Delta *float64 `json:"delta,omitempty"`
 }
 
-// Baseline is the commit a report was compared against, and how it was chosen.
-type Baseline struct {
-	Ref    string `json:"ref"`
-	Commit string `json:"commit"`
-}
-
 // Unit is a measured Unit. Lines counts non-blank lines.
 type Unit struct {
-	Kind      analysis.UnitKind `json:"kind"`
-	Name      string            `json:"name"`
-	Path      string            `json:"path,omitempty"`
-	Module    string            `json:"module,omitempty"`
-	StartLine int               `json:"startLine,omitempty"`
-	EndLine   int               `json:"endLine,omitempty"`
-	Lines     int               `json:"lines"`
+	Kind analysis.UnitKind `json:"kind"`
+	Name string            `json:"name"`
+	analysis.Location
+	Module string `json:"module,omitempty"`
+	Lines  int    `json:"lines"`
 	// Values are the Unit's value per Signal, written to JSON as one field
 	// per Signal.
 	Values Values     `json:"-"`
@@ -104,7 +97,9 @@ type Informational struct {
 	Cyclomatic int `json:"cyclomatic"`
 }
 
-const schemaVersion = 1
+// schemaVersion is the version of the JSON report described in
+// docs/json-report.md. It changes when a field is removed or renamed.
+const schemaVersion = 2
 
 // Options configure a measurement.
 type Options struct {
@@ -188,14 +183,15 @@ func measureGroup(analysed []analysedFile, weights map[signal.Signal]float64, ex
 	repo := Unit{Kind: analysis.Repository, Values: Values{}}
 	for _, f := range analysed {
 		module := ModuleOf(f.Path)
-		file := Unit{Kind: analysis.File, Name: f.Path, Path: f.Path, Module: module,
-			StartLine: 1, EndLine: len(f.lines), Lines: nonBlank(f.lines),
-			Values: Values{signal.Duplication: f.duplicated(cloned[f.Path], 1, len(f.lines))}}
+		file := Unit{Kind: analysis.File, Name: f.Path, Module: module,
+			Location: analysis.Location{Path: f.Path, StartLine: 1, EndLine: len(f.lines)},
+			Lines:    nonBlank(f.lines),
+			Values:   Values{signal.Duplication: f.duplicated(cloned[f.Path], 1, len(f.lines))}}
 		for _, u := range f.units {
 			unit := Unit{
-				Kind: u.Kind, Name: u.Name, Path: f.Path, Module: module,
-				StartLine: u.StartLine, EndLine: u.EndLine,
-				Lines: nonBlank(f.lines[u.StartLine-1 : u.EndLine]),
+				Kind: u.Kind, Name: u.Name, Module: module,
+				Location: analysis.Location{Path: f.Path, StartLine: u.StartLine, EndLine: u.EndLine},
+				Lines:    nonBlank(f.lines[u.StartLine-1 : u.EndLine]),
 				Values: Values{
 					signal.Complexity:  u.Complexity,
 					signal.Duplication: f.duplicated(cloned[f.Path], u.StartLine, u.EndLine),
@@ -215,7 +211,7 @@ func measureGroup(analysed []analysedFile, weights map[signal.Signal]float64, ex
 
 		m, ok := modules[module]
 		if !ok {
-			m = &Unit{Kind: analysis.Module, Name: module, Path: module, Values: Values{}}
+			m = &Unit{Kind: analysis.Module, Name: module, Location: analysis.Location{Path: module}, Values: Values{}}
 			modules[module] = m
 		}
 		m.add(file)

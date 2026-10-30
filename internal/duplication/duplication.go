@@ -8,12 +8,8 @@ import (
 	"github.com/umbralux1/entropic/internal/analysis"
 )
 
-// Location is a line range in a file. Lines are 1-based and inclusive.
-type Location struct {
-	Path      string `json:"path"`
-	StartLine int    `json:"startLine"`
-	EndLine   int    `json:"endLine"`
-}
+// Location is a line range in a file.
+type Location = analysis.Location
 
 // CloneGroup is every location of one duplicated fragment. One of them is
 // the original; Duplication counts only the others, the additional copies.

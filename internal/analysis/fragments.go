@@ -48,7 +48,7 @@ func Fragments(source []byte, lang Language, minLines int) ([]Fragment, error) {
 			s = span{first: -1}
 			var buf [8]byte
 			for i := uint(0); i < n.ChildCount(); i++ {
-				if lang.Unduplicable[n.Child(i).Kind()] {
+				if lang.IgnoredByDuplication[n.Child(i).Kind()] {
 					continue
 				}
 				child, cs := visit(n.Child(i))

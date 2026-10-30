@@ -176,8 +176,8 @@ func TestSnapshotReportsGoFunctionComplexityAsJSON(t *testing.T) {
 
 	r := repo.Run("--base", "none", "--format", "json").Report(0)
 
-	if r.SchemaVersion != 1 {
-		t.Errorf("schemaVersion: want 1, got %d", r.SchemaVersion)
+	if r.SchemaVersion != 2 {
+		t.Errorf("schemaVersion: want 2, got %d", r.SchemaVersion)
 	}
 	want := []testrepo.ReportUnit{
 		{Kind: "function", Name: "Sign", Path: "calc/calc.go", Module: "calc", StartLine: 3, EndLine: 8, Lines: 6, Complexity: 1,

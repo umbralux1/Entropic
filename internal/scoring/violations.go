@@ -12,11 +12,14 @@ type Violation struct {
 	Units     []UnitRef `json:"units"`
 }
 
-// UnitRef identifies a Unit in the report.
+// UnitRef identifies a Unit in the report: its kind, name and Location.
 type UnitRef struct {
-	Kind      analysis.UnitKind `json:"kind"`
-	Name      string            `json:"name"`
-	Path      string            `json:"path,omitempty"`
-	StartLine int               `json:"startLine,omitempty"`
-	EndLine   int               `json:"endLine,omitempty"`
+	Kind analysis.UnitKind `json:"kind"`
+	Name string            `json:"name"`
+	analysis.Location
+}
+
+// Ref identifies u.
+func (u Unit) Ref() UnitRef {
+	return UnitRef{Kind: u.Kind, Name: u.Name, Location: u.Location}
 }

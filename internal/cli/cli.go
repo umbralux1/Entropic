@@ -88,7 +88,7 @@ func withHotspots(dir string, r scoring.Report, windowDays int, weights map[sign
 func measure(dir, base string, cfg config.Config, stderr io.Writer) (scoring.Report, error) {
 	inScope := func(p string) bool {
 		lang, ok := language.ForPath(p)
-		return ok && !lang.Vendored(p) && !cfg.Excluded(p)
+		return ok && !lang.IsVendored(p) && !cfg.Excluded(p)
 	}
 	opts := scoring.Options{Weights: cfg.Weights, DuplicateMinLines: cfg.DuplicateMinLines}
 	baseline, err := revisions.Resolve(dir, base)
@@ -117,7 +117,7 @@ func measure(dir, base string, cfg config.Config, stderr io.Writer) (scoring.Rep
 		return scoring.Report{}, err
 	}
 	r := scoring.Compare(current, before)
-	r.Baseline = &scoring.Baseline{Ref: baseline.Ref, Commit: baseline.Commit}
+	r.Baseline = baseline
 
 	changed, err := revisions.ChangedLines(dir, baseline.Commit, inScope)
 	if err != nil {

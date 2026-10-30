@@ -163,12 +163,16 @@ type ReportLocation struct {
 	Original  bool   `json:"original"`
 }
 
-// ReportHotspot is a file Unit ranked by entropy times Churn.
+// ReportHotspot is a file Unit ranked by weighted Signal total times Churn.
 type ReportHotspot struct {
-	Path    string  `json:"path"`
-	Churn   int     `json:"churn"`
-	Entropy float64 `json:"entropy"`
-	Score   float64 `json:"score"`
+	Kind          string  `json:"kind"`
+	Name          string  `json:"name"`
+	Path          string  `json:"path"`
+	StartLine     int     `json:"startLine"`
+	EndLine       int     `json:"endLine"`
+	Churn         int     `json:"churn"`
+	WeightedTotal float64 `json:"weightedTotal"`
+	Score         float64 `json:"score"`
 }
 
 // ReportScatter is the Scatter of the change between Baseline and current state.
@@ -184,7 +188,7 @@ type ReportScatter struct {
 // ReportScatterInformational holds Scatter's informational values.
 type ReportScatterInformational struct {
 	Files            int     `json:"files"`
-	Entropy          float64 `json:"entropy"`
+	ShannonEntropy   float64 `json:"shannonEntropy"`
 	EffectiveModules float64 `json:"effectiveModules"`
 }
 

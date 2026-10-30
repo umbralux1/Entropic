@@ -88,7 +88,7 @@ func scatterOverBudget(s *scatter.Scatter, limit float64) (scoring.Violation, bo
 	}
 	units := make([]scoring.UnitRef, len(s.TouchedModules))
 	for i, m := range s.TouchedModules {
-		units[i] = scoring.UnitRef{Kind: analysis.Module, Name: m, Path: m}
+		units[i] = scoring.UnitRef{Kind: analysis.Module, Name: m, Location: analysis.Location{Path: m}}
 	}
 	return scoring.Violation{Threshold: signal.ScatterThreshold.Name, Limit: limit, Value: excess, Units: units}, true
 }
@@ -124,7 +124,7 @@ func entropyScore(g scoring.Group, limit float64) (scoring.Violation, bool) {
 func refs(units []scoring.Unit) []scoring.UnitRef {
 	out := make([]scoring.UnitRef, len(units))
 	for i, u := range units {
-		out[i] = scoring.UnitRef{Kind: u.Kind, Name: u.Name, Path: u.Path, StartLine: u.StartLine, EndLine: u.EndLine}
+		out[i] = u.Ref()
 	}
 	return out
 }

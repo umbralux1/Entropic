@@ -36,8 +36,8 @@ type File struct {
 // Baseline is the commit a measurement is compared against. Ref says how it
 // was chosen.
 type Baseline struct {
-	Ref    string
-	Commit string
+	Ref    string `json:"ref"`
+	Commit string `json:"commit"`
 }
 
 // Resolve turns a --base value into a Baseline, or nil for None.

@@ -23,6 +23,23 @@ const (
 	Repository UnitKind = "repository"
 )
 
+// Location is where a piece of code lives: a slash-separated path relative
+// to the repository root and a 1-based, inclusive line range. A Module has a
+// path but no lines; the repository has neither.
+type Location struct {
+	Path      string `json:"path,omitempty"`
+	StartLine int    `json:"startLine,omitempty"`
+	EndLine   int    `json:"endLine,omitempty"`
+}
+
+// String is the location as path:start-end, or the path alone without lines.
+func (l Location) String() string {
+	if l.StartLine == 0 {
+		return l.Path
+	}
+	return fmt.Sprintf("%s:%d-%d", l.Path, l.StartLine, l.EndLine)
+}
+
 // Unit is a piece of code a Signal is measured on. Lines are 1-based.
 type Unit struct {
 	Kind       UnitKind
@@ -64,9 +81,9 @@ type Language struct {
 	// Abstracted are node kinds, identifiers and literals, whose text
 	// Duplication ignores, so that renamed copies still count as clones.
 	Abstracted map[string]bool
-	// Unduplicable are node kinds, such as imports and comments, that
+	// IgnoredByDuplication are node kinds, such as imports and comments, that
 	// Duplication skips: they neither form a clone nor tell two clones apart.
-	Unduplicable map[string]bool
+	IgnoredByDuplication map[string]bool
 }
 
 // IsTest reports whether a slash-separated path holds test code: its file
@@ -92,8 +109,8 @@ func (l Language) IsGenerated(source []byte) bool {
 	return l.Generated != nil && l.Generated.Match(source)
 }
 
-// Vendored reports whether a slash-separated path lies in a vendored directory.
-func (l Language) Vendored(path string) bool {
+// IsVendored reports whether a slash-separated path lies in a vendored directory.
+func (l Language) IsVendored(path string) bool {
 	dirs := strings.Split(path, "/")
 	for _, d := range dirs[:len(dirs)-1] {
 		if slices.Contains(l.VendorDirs, d) {

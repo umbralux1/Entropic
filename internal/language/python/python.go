@@ -42,7 +42,7 @@ var Language = analysis.Language{
 		"string":              true,
 		"concatenated_string": true,
 	},
-	Unduplicable: map[string]bool{
+	IgnoredByDuplication: map[string]bool{
 		"import_statement":        true,
 		"import_from_statement":   true,
 		"future_import_statement": true,
