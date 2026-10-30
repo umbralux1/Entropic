@@ -10,6 +10,7 @@ import (
 
 	"github.com/umbralux1/entropic/internal/analysis"
 	"github.com/umbralux1/entropic/internal/duplication"
+	"github.com/umbralux1/entropic/internal/scatter"
 )
 
 // SourceFile is one file to measure. Path is slash-separated and relative to
@@ -33,6 +34,9 @@ type Report struct {
 	ChurnWindowDays int `json:"churnWindowDays"`
 	// Hotspots rank production file Units by entropy times Churn.
 	Hotspots []Hotspot `json:"hotspots"`
+	// Scatter is the Scatter of the change since the Baseline, test files
+	// included; nil for a snapshot.
+	Scatter *scatter.Scatter `json:"scatter,omitempty"`
 }
 
 // Group is the measurement of one group of files, rolled up to its own
@@ -44,6 +48,12 @@ type Group struct {
 	Units        []Unit            `json:"units"`
 	// CloneGroups are the structural clones found by Duplication.
 	CloneGroups []duplication.CloneGroup `json:"cloneGroups"`
+}
+
+// ModuleOf returns the Module a file belongs to: its directory, "." for the
+// repository root.
+func ModuleOf(file string) string {
+	return path.Dir(file)
 }
 
 // Figure is a repository-wide number and, when there is a Baseline, its Delta.
@@ -107,8 +117,8 @@ func Measure(files []SourceFile, weights map[Signal]float64, duplicateMinLines i
 	return r, nil
 }
 
-// measureGroup returns the Units of files: functions, then files, then
-// Modules, then the repository. Clones are sought within the group.
+// measureGroup returns the Units of files: functions, then classes, then
+// files, then Modules, then the repository. Clones are sought within the group.
 func measureGroup(files []SourceFile, weights map[Signal]float64, duplicateMinLines int) (Group, error) {
 	analysed := make([]analysedFile, len(files))
 	fragments := map[string][]analysis.Fragment{}
@@ -127,16 +137,16 @@ func measureGroup(files []SourceFile, weights map[Signal]float64, duplicateMinLi
 	clones := duplication.Find(fragments)
 	cloned := clonedLines(clones)
 
-	var functions, fileUnits []Unit
+	var functions, classes, fileUnits []Unit
 	modules := map[string]*Unit{}
 	repo := Unit{Kind: analysis.Repository, Values: Values{}}
 	for _, f := range analysed {
-		module := path.Dir(f.Path)
+		module := ModuleOf(f.Path)
 		file := Unit{Kind: analysis.File, Name: f.Path, Path: f.Path, Module: module,
 			StartLine: 1, EndLine: len(f.lines), Lines: nonBlank(f.lines),
 			Values: Values{Duplication: f.duplicated(cloned[f.Path], 1, len(f.lines))}}
 		for _, u := range f.units {
-			functions = append(functions, Unit{
+			unit := Unit{
 				Kind: u.Kind, Name: u.Name, Path: f.Path, Module: module,
 				StartLine: u.StartLine, EndLine: u.EndLine,
 				Lines: nonBlank(f.lines[u.StartLine-1 : u.EndLine]),
@@ -144,9 +154,16 @@ func measureGroup(files []SourceFile, weights map[Signal]float64, duplicateMinLi
 					Complexity:  u.Complexity,
 					Duplication: f.duplicated(cloned[f.Path], u.StartLine, u.EndLine),
 				},
-				Informational: &Informational{Cyclomatic: u.Cyclomatic},
-			})
-			file.Values[Complexity] += u.Complexity
+			}
+			// A class already rolls up the functions it encloses, so only
+			// functions roll up into the file.
+			if u.Kind == analysis.Function {
+				unit.Informational = &Informational{Cyclomatic: u.Cyclomatic}
+				file.Values[Complexity] += u.Complexity
+				functions = append(functions, unit)
+			} else {
+				classes = append(classes, unit)
+			}
 		}
 		fileUnits = append(fileUnits, file)
 
@@ -159,7 +176,7 @@ func measureGroup(files []SourceFile, weights map[Signal]float64, duplicateMinLi
 		repo.add(file)
 	}
 
-	units := append(functions, fileUnits...)
+	units := append(append(functions, classes...), fileUnits...)
 	names := make([]string, 0, len(modules))
 	for name := range modules {
 		names = append(names, name)

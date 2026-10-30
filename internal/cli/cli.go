@@ -12,6 +12,7 @@ import (
 	"github.com/umbralux1/entropic/internal/language"
 	"github.com/umbralux1/entropic/internal/reporters"
 	"github.com/umbralux1/entropic/internal/revisions"
+	"github.com/umbralux1/entropic/internal/scatter"
 	"github.com/umbralux1/entropic/internal/scoring"
 )
 
@@ -86,26 +87,53 @@ func measure(dir, base string, cfg config.Config) (scoring.Report, error) {
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	files, err := revisions.WorkingTree(dir, inScope)
+	nowFiles, err := revisions.WorkingTree(dir, inScope)
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	current, err := scoring.Measure(sourceFiles(files), weights, cfg.DuplicateMinLines)
+	current, err := scoring.Measure(sourceFiles(nowFiles), weights, cfg.DuplicateMinLines)
 	if err != nil || baseline == nil {
 		return current, err
 	}
 
-	files, err = revisions.AtCommit(dir, baseline.Commit, inScope)
+	baseFiles, err := revisions.AtCommit(dir, baseline.Commit, inScope)
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	before, err := scoring.Measure(sourceFiles(files), weights, cfg.DuplicateMinLines)
+	before, err := scoring.Measure(sourceFiles(baseFiles), weights, cfg.DuplicateMinLines)
 	if err != nil {
 		return scoring.Report{}, fmt.Errorf("at Baseline %s: %w", baseline.Ref, err)
 	}
 	r := scoring.Compare(current, before)
 	r.Baseline = &scoring.Baseline{Ref: baseline.Ref, Commit: baseline.Commit}
+
+	changed, err := revisions.ChangedLines(dir, baseline.Commit, inScope)
+	if err != nil {
+		return scoring.Report{}, err
+	}
+	s := scatter.Measure(changes(changed, nowFiles, baseFiles))
+	r.Scatter = &s
 	return r, nil
+}
+
+// changes turns changed lines per file into Scatter's input, leaving out
+// files that are generated now or were at the Baseline.
+func changes(changed map[string]int, current, baseline []revisions.File) []scatter.Change {
+	generated := map[string]bool{}
+	for _, f := range append(append([]revisions.File(nil), current...), baseline...) {
+		lang, _ := language.ForPath(f.Path)
+		if lang.IsGenerated(f.Source) {
+			generated[f.Path] = true
+		}
+	}
+	out := make([]scatter.Change, 0, len(changed))
+	for path, lines := range changed {
+		if generated[path] {
+			continue
+		}
+		out = append(out, scatter.Change{Path: path, Module: scoring.ModuleOf(path), Lines: lines})
+	}
+	return out
 }
 
 // signalWeights is cfg's Signal weights keyed by Signal.

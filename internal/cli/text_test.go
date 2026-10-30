@@ -25,6 +25,20 @@ func TestTextSnapshotShowsScoreSignalsAndUnitLocations(t *testing.T) {
 	}
 }
 
+func TestTextListsFunctionsBeforeTheirClasses(t *testing.T) {
+	repo := testrepo.New(t).Write("cart.py", `class Cart:
+    def total(self, items):
+        return sum(items)
+`).Commit("add cart")
+
+	out := repo.Run("--base", "none", "--format", "text").Text(0)
+
+	method, class := strings.Index(out, "function "), strings.Index(out, "class ")
+	if method < 0 || class < 0 || class < method {
+		t.Errorf("want function Cart.total listed before class Cart:\n%s", out)
+	}
+}
+
 func TestTextListsUnitsWithLargestDeltaFirst(t *testing.T) {
 	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc").
 		Write("calc/calc.go", signNested). // Sign: Complexity 1 -> 3, Delta +2
@@ -51,6 +65,26 @@ func Grid(rows [][]int) {
 		last = i
 	}
 	for _, want := range []string{"HEAD", "+2", "+1", "added", "calc/grid.go:3-6"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("text report lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTextShowsScatterAgainstItsBudget(t *testing.T) {
+	repo := testrepo.New(t)
+	for _, m := range []string{"a", "b", "c", "d"} {
+		repo.Write(m+"/f.go", "package "+m+"\n\nfunc F() {}\n")
+	}
+	repo.Commit("add four Modules")
+	for _, m := range []string{"a", "b", "c", "d"} {
+		repo.Write(m+"/f.go", "package "+m+"\n\nfunc G() {}\n")
+	}
+
+	out := repo.Run("--format", "text").Text(0)
+
+	// 4 Modules for 8 changed lines; budget 1 + log2(1.8) = 1.85.
+	for _, want := range []string{"Scatter", "4 Modules", "budget 1.85", "over budget"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text report lacks %q:\n%s", want, out)
 		}

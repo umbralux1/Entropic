@@ -29,7 +29,16 @@ func Text(w io.Writer, r scoring.Report) error {
 	if r.Baseline == nil {
 		b.WriteString("Snapshot (no Baseline)\n\n")
 	} else {
-		fmt.Fprintf(&b, "Baseline: %s (%s)\n\n", r.Baseline.Ref, shortCommit(r.Baseline.Commit))
+		fmt.Fprintf(&b, "Baseline: %s (%s)\n", r.Baseline.Ref, shortCommit(r.Baseline.Commit))
+		if s := r.Scatter; s != nil {
+			verdict := "within budget"
+			if s.OverBudget {
+				verdict = "over budget"
+			}
+			fmt.Fprintf(&b, "Scatter: %d Modules, %d changed lines (budget %s, %s)\n",
+				s.Modules, s.ChangedLines, number(s.Budget), verdict)
+		}
+		b.WriteString("\n")
 	}
 	if err := group(&b, r.Group); err != nil {
 		return err
