@@ -3,13 +3,13 @@
 package cli
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 
 	"github.com/umbralux1/entropic/internal/config"
 	"github.com/umbralux1/entropic/internal/language"
+	"github.com/umbralux1/entropic/internal/reporters"
 	"github.com/umbralux1/entropic/internal/revisions"
 	"github.com/umbralux1/entropic/internal/scoring"
 )
@@ -20,6 +20,12 @@ const (
 	ExitError = 2
 )
 
+// renderers maps each --format value to its reporter.
+var renderers = map[string]func(io.Writer, scoring.Report) error{
+	"json": reporters.JSON,
+	"text": reporters.Text,
+}
+
 // Run executes entropic with args in the repository at dir and returns the
 // process exit code.
 func Run(args []string, dir string, stdout, stderr io.Writer) int {
@@ -27,12 +33,13 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	base := flags.String("base", revisions.Auto,
 		"Baseline revision to compare against, or none for a snapshot (default: HEAD if the working tree is dirty, else merge-base with main)")
-	format := flags.String("format", "json", "output format: json")
+	format := flags.String("format", "json", "output format: json or text")
 	if err := flags.Parse(args); err != nil {
 		return ExitError
 	}
-	if *format != "json" {
-		fmt.Fprintf(stderr, "entropic: --format %s is not supported yet; use --format json\n", *format)
+	render, ok := renderers[*format]
+	if !ok {
+		fmt.Fprintf(stderr, "entropic: unknown --format %s; use json or text\n", *format)
 		return ExitError
 	}
 
@@ -46,9 +53,7 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
 		return ExitError
 	}
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(r); err != nil {
+	if err := render(stdout, r); err != nil {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
 		return ExitError
 	}
