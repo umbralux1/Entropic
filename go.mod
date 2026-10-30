@@ -3,6 +3,7 @@ module github.com/umbralux1/entropic
 go 1.27.3
 
 require (
+	github.com/BurntSushi/toml v1.5.0
 	github.com/tree-sitter/go-tree-sitter v0.25.0
 	github.com/tree-sitter/tree-sitter-go v0.25.0
 	github.com/tree-sitter/tree-sitter-python v0.25.0

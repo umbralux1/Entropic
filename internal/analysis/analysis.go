@@ -3,6 +3,10 @@ package analysis
 
 import (
 	"fmt"
+	"path"
+	"regexp"
+	"slices"
+	"strings"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -49,6 +53,41 @@ type Language struct {
 	Complexity func(fn *sitter.Node, source []byte) int
 	// Cyclomatic counts the independent paths through fn.
 	Cyclomatic func(fn *sitter.Node) int
+	// VendorDirs are directory names holding vendored code, not measured.
+	VendorDirs []string
+	// TestPaths are path.Match patterns for test code: a file is a test when
+	// its name or any directory above it matches one.
+	TestPaths []string
+	// Generated matches source marked as generated, which is not measured.
+	Generated *regexp.Regexp
+}
+
+// IsTest reports whether a slash-separated path holds test code.
+func (l Language) IsTest(p string) bool {
+	for _, elem := range strings.Split(p, "/") {
+		for _, pattern := range l.TestPaths {
+			if ok, _ := path.Match(pattern, elem); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// IsGenerated reports whether source is marked as generated.
+func (l Language) IsGenerated(source []byte) bool {
+	return l.Generated != nil && l.Generated.Match(source)
+}
+
+// Vendored reports whether a slash-separated path lies in a vendored directory.
+func (l Language) Vendored(path string) bool {
+	dirs := strings.Split(path, "/")
+	for _, d := range dirs[:len(dirs)-1] {
+		if slices.Contains(l.VendorDirs, d) {
+			return true
+		}
+	}
+	return false
 }
 
 // Analyze parses source in the given language and returns its function and
