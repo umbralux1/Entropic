@@ -12,11 +12,12 @@ import (
 )
 
 // SourceFile is one file to measure. Path is slash-separated and relative to
-// the repository root.
+// the repository root. Test files are measured in a group of their own.
 type SourceFile struct {
 	Path     string
 	Source   []byte
 	Language analysis.Language
+	Test     bool
 }
 
 // Signal names one measurable kind of entropy.
@@ -24,14 +25,19 @@ type Signal string
 
 const Complexity Signal = "complexity"
 
-// weights are the provisional Signal weights in the Entropy Score.
-var weights = map[Signal]float64{Complexity: 1}
-
-// Report is the result of a measurement.
+// Report is the result of a measurement. Its own Group is production code;
+// Tests is the same for test files, so they never affect production Signals.
 type Report struct {
 	SchemaVersion int `json:"schemaVersion"`
 	// Baseline is nil for a snapshot.
 	Baseline *Baseline `json:"baseline"`
+	Group
+	Tests Group `json:"tests"`
+}
+
+// Group is the measurement of one group of files, rolled up to its own
+// repository Unit.
+type Group struct {
 	// EntropyScore is the weighted Signal total per 100 non-blank lines.
 	EntropyScore Figure            `json:"entropyScore"`
 	Signals      map[Signal]Figure `json:"signals"`
@@ -74,9 +80,31 @@ type Informational struct {
 
 const schemaVersion = 1
 
-// Measure analyses files and returns their Units: functions, then files,
-// then Modules, then the repository.
-func Measure(files []SourceFile) (Report, error) {
+// Measure analyses files, splitting production code from tests. weights
+// weigh each Signal in the Entropy Score.
+func Measure(files []SourceFile, weights map[Signal]float64) (Report, error) {
+	var production, tests []SourceFile
+	for _, f := range files {
+		if f.Test {
+			tests = append(tests, f)
+		} else {
+			production = append(production, f)
+		}
+	}
+	r := Report{SchemaVersion: schemaVersion}
+	var err error
+	if r.Group, err = measureGroup(production, weights); err != nil {
+		return Report{}, err
+	}
+	if r.Tests, err = measureGroup(tests, weights); err != nil {
+		return Report{}, err
+	}
+	return r, nil
+}
+
+// measureGroup returns the Units of files: functions, then files, then
+// Modules, then the repository.
+func measureGroup(files []SourceFile, weights map[Signal]float64) (Group, error) {
 	var functions, fileUnits []Unit
 	modules := map[string]*Unit{}
 	repo := Unit{Kind: analysis.Repository}
@@ -84,7 +112,7 @@ func Measure(files []SourceFile) (Report, error) {
 	for _, f := range files {
 		units, err := analysis.Analyze(f.Source, f.Language)
 		if err != nil {
-			return Report{}, fmt.Errorf("%s: %w", f.Path, err)
+			return Group{}, fmt.Errorf("%s: %w", f.Path, err)
 		}
 		module := path.Dir(f.Path)
 		lines := bytes.Split(bytes.TrimSuffix(f.Source, []byte("\n")), []byte("\n"))
@@ -123,17 +151,16 @@ func Measure(files []SourceFile) (Report, error) {
 	units = append(units, repo)
 
 	signals := map[Signal]Figure{Complexity: {Value: float64(repo.Complexity)}}
-	return Report{
-		SchemaVersion: schemaVersion,
-		EntropyScore:  Figure{Value: entropyScore(signals, repo.Lines)},
-		Signals:       signals,
-		Units:         units,
+	return Group{
+		EntropyScore: Figure{Value: entropyScore(signals, weights, repo.Lines)},
+		Signals:      signals,
+		Units:        units,
 	}, nil
 }
 
 // entropyScore weights each Signal and normalises by code size, so that
 // adding code alone does not raise the score.
-func entropyScore(signals map[Signal]Figure, lines int) float64 {
+func entropyScore(signals map[Signal]Figure, weights map[Signal]float64, lines int) float64 {
 	if lines == 0 {
 		return 0
 	}

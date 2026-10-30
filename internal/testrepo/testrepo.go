@@ -78,13 +78,20 @@ type Result struct {
 	Stderr string
 }
 
-// Report is the JSON report as a consumer reads it.
+// Report is the JSON report as a consumer reads it. Its own figures and
+// Units are production code; Tests holds the same for test files.
 type Report struct {
-	SchemaVersion int                     `json:"schemaVersion"`
-	Baseline      *ReportBaseline         `json:"baseline"`
-	EntropyScore  ReportFigure            `json:"entropyScore"`
-	Signals       map[string]ReportFigure `json:"signals"`
-	Units         []ReportUnit            `json:"units"`
+	SchemaVersion int             `json:"schemaVersion"`
+	Baseline      *ReportBaseline `json:"baseline"`
+	ReportGroup
+	Tests *ReportGroup `json:"tests"`
+}
+
+// ReportGroup is the Entropy Score, Signals and Units of one group of files.
+type ReportGroup struct {
+	EntropyScore ReportFigure            `json:"entropyScore"`
+	Signals      map[string]ReportFigure `json:"signals"`
+	Units        []ReportUnit            `json:"units"`
 }
 
 // ReportBaseline is the Baseline a report was compared against.
@@ -128,7 +135,7 @@ type ReportInformational struct {
 
 // Unit returns the Unit of the given kind and name, failing the test if
 // there is none.
-func (rep Report) Unit(t *testing.T, kind, name string) ReportUnit {
+func (rep ReportGroup) Unit(t *testing.T, kind, name string) ReportUnit {
 	t.Helper()
 	for _, u := range rep.Units {
 		if u.Kind == kind && u.Name == name {
@@ -140,7 +147,7 @@ func (rep Report) Unit(t *testing.T, kind, name string) ReportUnit {
 }
 
 // UnitsOfKind returns the Units of one kind, in report order.
-func (rep Report) UnitsOfKind(kind string) []ReportUnit {
+func (rep ReportGroup) UnitsOfKind(kind string) []ReportUnit {
 	var units []ReportUnit
 	for _, u := range rep.Units {
 		if u.Kind == kind {
