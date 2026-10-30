@@ -123,7 +123,8 @@ func measure(dir, base string, cfg config.Config) (scoring.Report, error) {
 }
 
 // changes turns changed lines per file into Scatter's input, leaving out
-// files that are generated now or were at the Baseline.
+// test files, like every production Signal, and files that are generated
+// now or were at the Baseline.
 func changes(changed map[string]int, current, baseline []revisions.File) []scatter.Change {
 	generated := map[string]bool{}
 	for _, f := range append(append([]revisions.File(nil), current...), baseline...) {
@@ -134,7 +135,7 @@ func changes(changed map[string]int, current, baseline []revisions.File) []scatt
 	}
 	out := make([]scatter.Change, 0, len(changed))
 	for path, lines := range changed {
-		if generated[path] {
+		if lang, _ := language.ForPath(path); generated[path] || lang.IsTest(path) {
 			continue
 		}
 		out = append(out, scatter.Change{Path: path, Module: scoring.ModuleOf(path), Lines: lines})

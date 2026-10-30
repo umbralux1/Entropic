@@ -34,8 +34,8 @@ type Report struct {
 	ChurnWindowDays int `json:"churnWindowDays"`
 	// Hotspots rank production file Units by entropy times Churn.
 	Hotspots []Hotspot `json:"hotspots"`
-	// Scatter is the Scatter of the change since the Baseline, test files
-	// included; nil for a snapshot.
+	// Scatter is the Scatter of the change since the Baseline in production
+	// code; nil for a snapshot.
 	Scatter *scatter.Scatter `json:"scatter,omitempty"`
 	// Violations are the thresholds the change exceeded; none for a snapshot.
 	Violations []Violation `json:"violations"`

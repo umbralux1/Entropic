@@ -156,6 +156,22 @@ func TestScatterLeavesOutExcludedVendoredAndGeneratedFiles(t *testing.T) {
 	}
 }
 
+func TestScatterLeavesOutTestFiles(t *testing.T) {
+	repo := testrepo.New(t).
+		Write("app/core.py", "def run():\n    return 1\n").
+		Write("tests/test_core.py", "def test_run():\n    pass\n").
+		Commit("start").
+		Write("app/core.py", "def run():\n    return 2\n"). // 1 deleted, 1 added
+		Write("tests/test_core.py", "def test_run():\n    assert True\n\n\ndef test_more():\n    pass\n")
+
+	// Counting the test, 2 Modules would exceed a budget of 1 + log2(1.2) = 1.26.
+	r := repo.Run("--format", "json").Report(0)
+
+	if s := r.Scatter; s == nil || s.Modules != 1 || s.ChangedLines != 2 || s.Informational.Files != 1 {
+		t.Errorf("Scatter: want only app (1 Module, 2 lines, 1 file); got %+v", s)
+	}
+}
+
 func TestScatterOfCommittedRenameAgainstExplicitBase(t *testing.T) {
 	repo := testrepo.New(t).Write("a/f.go", "package a\n\nfunc F() {}\n").Commit("start")
 	start := repo.Rev("HEAD")
