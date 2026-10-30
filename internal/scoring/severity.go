@@ -13,7 +13,7 @@ import (
 // weighted value for a snapshot); then by weighted value. Ties keep source
 // order.
 func (r Report) InSeverityOrder() Report {
-	r.Group.Units = r.bySeverity(r.Group.Units)
+	r.Units = r.bySeverity(r.Units)
 	r.Tests.Units = r.bySeverity(r.Tests.Units)
 	return r
 }

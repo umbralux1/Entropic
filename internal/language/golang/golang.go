@@ -20,8 +20,7 @@ var Language = analysis.Language{
 		"method_declaration":   true,
 	},
 	UnitName:   unitName,
-	Complexity: complexity,
-	Cyclomatic: cyclomatic,
+	Complexity: complexityRules,
 	VendorDirs: []string{"vendor"},
 	TestFiles:  []string{"*_test.go"},
 	// The convention from "go help generate".

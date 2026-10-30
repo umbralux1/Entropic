@@ -22,8 +22,7 @@ var Language = analysis.Language{
 		"class_definition": true,
 	},
 	UnitName:   unitName,
-	Complexity: complexity,
-	Cyclomatic: cyclomatic,
+	Complexity: complexityRules,
 	// vendor by general convention, _vendor as pip and setuptools do,
 	// site-packages for a checked-in environment.
 	VendorDirs: []string{"vendor", "_vendor", "site-packages"},

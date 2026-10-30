@@ -69,10 +69,9 @@ type Language struct {
 	Classes map[string]bool
 	// UnitName names the function or class Unit formed by n.
 	UnitName func(n *sitter.Node, source []byte) string
-	// Complexity scores the function Unit formed by fn.
-	Complexity func(fn *sitter.Node, source []byte) int
-	// Cyclomatic counts the independent paths through fn.
-	Cyclomatic func(fn *sitter.Node) int
+	// Complexity says which nodes count towards a function's Complexity and
+	// its informational cyclomatic complexity.
+	Complexity ComplexityRules
 	// VendorDirs are directory names holding vendored code, not measured.
 	VendorDirs []string
 	// TestFiles are path.Match patterns for the names of test files.
@@ -172,8 +171,8 @@ func Analyze(source []byte, lang Language) ([]Unit, error) {
 		case lang.Functions[n.Kind()]:
 			unit.Kind = Function
 			unit.Name = lang.UnitName(n, source)
-			unit.Complexity = lang.Complexity(n, source)
-			unit.Cyclomatic = lang.Cyclomatic(n)
+			unit.Complexity = complexity(n, source, lang.Complexity)
+			unit.Cyclomatic = cyclomatic(n, lang.Complexity)
 			units = append(units, unit)
 			return unit.Complexity // a nested function is part of the function it is in
 		case lang.Classes[n.Kind()]:
