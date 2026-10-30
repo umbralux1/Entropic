@@ -43,6 +43,24 @@ func TestChurnWindowDefaultsTo90Days(t *testing.T) {
 	}
 }
 
+func TestConfiguredChurnWindowLimitsHotspots(t *testing.T) {
+	repo := testrepo.New(t).
+		Write("calc/stale.go", calcGo).
+		Write("calc/hot.go", hotGo(0)).CommitDaysAgo(30, "add stale and hot").
+		Write("calc/hot.go", hotGo(1)).CommitDaysAgo(3, "tweak hot").
+		Write("entropic.toml", "churn_window_days = 7\n")
+
+	r := repo.Run("--base", "none").Report(0)
+
+	if r.ChurnWindow != 7 {
+		t.Errorf("churnWindowDays: want 7, got %d", r.ChurnWindow)
+	}
+	// stale.go changed only 30 days ago, outside the 7-day window.
+	if len(r.Hotspots) != 1 || r.Hotspots[0].Path != "calc/hot.go" || r.Hotspots[0].Churn != 1 {
+		t.Errorf("want only calc/hot.go with churn 1, got %+v", r.Hotspots)
+	}
+}
+
 func TestNoHistoryInWindowMeansNoHotspots(t *testing.T) {
 	repo := testrepo.New(t).Write("calc/calc.go", calcGo).CommitDaysAgo(200, "add calc")
 

@@ -51,7 +51,7 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 	}
 	r, err := measure(dir, *base, cfg)
 	if err == nil {
-		r, err = withHotspots(dir, r, defaultChurnWindowDays, signalWeights(cfg))
+		r, err = withHotspots(dir, r, cfg.ChurnWindowDays, signalWeights(cfg))
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
@@ -63,10 +63,6 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 	}
 	return ExitOK
 }
-
-// defaultChurnWindowDays is how far back Churn looks when nothing else says.
-// Ticket #8 makes it configurable; pass the configured value to withHotspots.
-const defaultChurnWindowDays = 90
 
 // withHotspots counts Churn over the last windowDays and ranks r's Hotspots.
 func withHotspots(dir string, r scoring.Report, windowDays int, weights map[scoring.Signal]float64) (scoring.Report, error) {
