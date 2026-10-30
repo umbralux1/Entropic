@@ -23,6 +23,9 @@ const (
 	Repository UnitKind = "repository"
 )
 
+// UnitKinds lists every kind of Unit, from finest to coarsest.
+var UnitKinds = []UnitKind{Function, Class, File, Module, Repository}
+
 // Location is where a piece of code lives: a slash-separated path relative
 // to the repository root and a 1-based, inclusive line range. A Module has a
 // path but no lines; the repository has neither.

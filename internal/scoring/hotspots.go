@@ -4,7 +4,6 @@ import (
 	"sort"
 
 	"github.com/umbralux1/entropic/internal/analysis"
-	"github.com/umbralux1/entropic/internal/signal"
 )
 
 // Hotspot is a file Unit whose entropy is paid for repeatedly: it has both
@@ -21,17 +20,16 @@ type Hotspot struct {
 
 // WithHotspots returns r with its file Units that have both a weighted
 // Signal total and Churn listed as Hotspots, highest score first. churn maps
-// file paths to their Churn over a window of windowDays; weights weigh each
-// Signal as in the Entropy Score. Churn is not a Signal: it does not feed
-// the Entropy Score.
-func (r Report) WithHotspots(churn map[string]int, windowDays int, weights map[signal.Signal]float64) Report {
+// file paths to their Churn over a window of windowDays. Churn is not a
+// Signal: it does not feed the Entropy Score.
+func (r Report) WithHotspots(churn map[string]int, windowDays int) Report {
 	r.ChurnWindowDays = windowDays
 	r.Hotspots = []Hotspot{}
 	for _, u := range r.Units {
 		if u.Kind != analysis.File || u.Status == Removed {
 			continue
 		}
-		total := u.Values.Weighted(weights)
+		total := u.Values.Weighted(r.weights)
 		if c := churn[u.Path]; c > 0 && total > 0 {
 			r.Hotspots = append(r.Hotspots, Hotspot{UnitRef: u.Ref(), Churn: c, WeightedTotal: total, Score: total * float64(c)})
 		}

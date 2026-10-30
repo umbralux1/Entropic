@@ -10,13 +10,13 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/umbralux1/entropic/internal/analysis"
 	"github.com/umbralux1/entropic/internal/scoring"
 	"github.com/umbralux1/entropic/internal/signal"
 )
 
-// JSON writes r as the versioned JSON report.
+// JSON writes r as the versioned JSON report, Units in severity order.
 func JSON(w io.Writer, r scoring.Report) error {
+	r = r.InSeverityOrder()
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(r)
@@ -26,6 +26,7 @@ func JSON(w io.Writer, r scoring.Report) error {
 // Score and Signal summaries, then the Units; test files follow in a
 // section of their own. Threshold violations, if any, come first.
 func Text(w io.Writer, r scoring.Report) error {
+	r = r.InSeverityOrder()
 	var b strings.Builder
 	violations(&b, r.Violations)
 	if r.Baseline == nil {
@@ -85,7 +86,7 @@ func group(b *strings.Builder, g scoring.Group) error {
 
 	b.WriteString("\nUnits\n")
 	tw := tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
-	for _, u := range bySeverity(g.Units) {
+	for _, u := range g.Units {
 		fmt.Fprintf(tw, "  %s\t%s\t%s\t", u.Kind, u.Name, u.Location)
 		for _, s := range signal.OfCode {
 			fmt.Fprintf(tw, "%s %s\t", s, unitValue(u, s))
@@ -93,49 +94,6 @@ func group(b *strings.Builder, g scoring.Group) error {
 		fmt.Fprintf(tw, "%s\n", u.Status)
 	}
 	return tw.Flush()
-}
-
-// bySeverity returns units grouped by kind, finest first, and within a kind
-// ordered by Signal Delta, largest first (by Signal values for a snapshot),
-// comparing Signals in reporting order.
-func bySeverity(units []scoring.Unit) []scoring.Unit {
-	rank := map[analysis.UnitKind]int{}
-	for _, u := range units {
-		if _, ok := rank[u.Kind]; !ok {
-			rank[u.Kind] = len(rank)
-		}
-	}
-	out := append([]scoring.Unit(nil), units...)
-	sort.SliceStable(out, func(i, j int) bool {
-		a, b := out[i], out[j]
-		if rank[a.Kind] != rank[b.Kind] {
-			return rank[a.Kind] < rank[b.Kind]
-		}
-		if c := compareValues(severity(a), severity(b)); c != 0 {
-			return c > 0
-		}
-		return compareValues(a.Values, b.Values) > 0
-	})
-	return out
-}
-
-// compareValues orders Values by each Signal in reporting order: positive
-// when a is larger, negative when b is, zero when equal.
-func compareValues(a, b scoring.Values) int {
-	for _, s := range signal.OfCode {
-		if a[s] != b[s] {
-			return a[s] - b[s]
-		}
-	}
-	return 0
-}
-
-// severity is a Unit's Delta, or its values for a snapshot.
-func severity(u scoring.Unit) scoring.Values {
-	if u.Delta == nil {
-		return u.Values
-	}
-	return u.Delta.Values
 }
 
 func figure(f scoring.Figure) string {

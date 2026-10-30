@@ -16,7 +16,6 @@ import (
 	"github.com/umbralux1/entropic/internal/revisions"
 	"github.com/umbralux1/entropic/internal/scatter"
 	"github.com/umbralux1/entropic/internal/scoring"
-	"github.com/umbralux1/entropic/internal/signal"
 )
 
 // Exit codes.
@@ -56,7 +55,7 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 	}
 	r, err := measure(dir, *base, cfg, stderr)
 	if err == nil {
-		r, err = withHotspots(dir, r, cfg.ChurnWindowDays, cfg.Weights)
+		r, err = withHotspots(dir, r, cfg.ChurnWindowDays)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
@@ -74,12 +73,12 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 }
 
 // withHotspots counts Churn over the last windowDays and ranks r's Hotspots.
-func withHotspots(dir string, r scoring.Report, windowDays int, weights map[signal.Signal]float64) (scoring.Report, error) {
+func withHotspots(dir string, r scoring.Report, windowDays int) (scoring.Report, error) {
 	churn, err := revisions.Churn(dir, time.Now().AddDate(0, 0, -windowDays))
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	return r.WithHotspots(churn, windowDays, weights), nil
+	return r.WithHotspots(churn, windowDays), nil
 }
 
 // measure measures the working tree and, unless base is none, compares it

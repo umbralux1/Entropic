@@ -50,6 +50,8 @@ type Report struct {
 	unparsable []string
 	// shapes are the fragment shapes Duplication compared, per file path.
 	shapes map[string]map[uint64]bool
+	// weights weigh each Signal, as in the Entropy Score.
+	weights map[signal.Signal]float64
 }
 
 // Group is the measurement of one group of files, rolled up to its own
@@ -117,7 +119,8 @@ type Options struct {
 
 // Measure analyses files, splitting production code from tests.
 func Measure(files []SourceFile, opts Options) (Report, error) {
-	r := Report{SchemaVersion: schemaVersion, SkippedAtBaseline: []string{}, shapes: map[string]map[uint64]bool{}}
+	r := Report{SchemaVersion: schemaVersion, SkippedAtBaseline: []string{},
+		shapes: map[string]map[uint64]bool{}, weights: opts.Weights}
 	var production, tests []analysedFile
 	for _, f := range files {
 		a, err := analyse(f, opts.DuplicateMinLines)
