@@ -108,7 +108,7 @@ func TestImportBlocksAreNotClones(t *testing.T) {
 
 func TestClonesBelowMinimumSizeAreNotReported(t *testing.T) {
 	// Inc and Dec are structural clones, but each spans only 4 lines,
-	// below the default minimum of 5.
+	// below the default minimum of 6.
 	repo := testrepo.New(t).Write("small.go", `package small
 
 func Inc(x int) int {
@@ -126,5 +126,20 @@ func Dec(a int) int {
 
 	if len(r.CloneGroups) != 0 {
 		t.Errorf("want no clone groups, got %+v", r.CloneGroups)
+	}
+}
+
+func TestDuplicateMinimumSizeComesFromConfig(t *testing.T) {
+	// SumPositive and its copy CountAbove span 9 lines: below a minimum of 10.
+	repo := testrepo.New(t).
+		Write("entropic.toml", "duplicate_min_lines = 10\n").
+		Write("calc/calc.go", calcGo).
+		Write("stats/stats.go", countAbove).
+		Commit("copy SumPositive")
+
+	r := repo.Run("--base", "none", "--format", "json").Report(0)
+
+	if len(r.CloneGroups) != 0 || r.Signals["duplication"].Value != 0 {
+		t.Errorf("want no clones under a minimum of 10 lines, got %+v and %+v", r.CloneGroups, r.Signals)
 	}
 }

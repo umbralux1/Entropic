@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // --base values with special meaning.
@@ -119,6 +120,45 @@ func AtCommit(dir, commit string, want func(path string) bool) ([]File, error) {
 		files = append(files, File{Path: path, Source: source})
 	}
 	return files, nil
+}
+
+// Churn counts, per file path at HEAD, the non-merge commits reachable from
+// HEAD that changed the file and were committed after since. Changes made
+// under an earlier name count towards the file's name at HEAD.
+func Churn(dir string, since time.Time) (map[string]int, error) {
+	churn := map[string]int{}
+	if _, err := git(dir, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
+		return churn, nil // no commits yet: no history
+	}
+	out, err := git(dir, "log", "-z", "--format=", "--name-status", "-M", "--no-merges",
+		"--since="+since.Format(time.RFC3339), "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("read history for Churn: %w", err)
+	}
+	// Walk newest first, remembering which later name each earlier name became.
+	renamedTo := map[string]string{}
+	nameAtHead := func(path string) string {
+		if later, ok := renamedTo[path]; ok {
+			return later
+		}
+		return path
+	}
+	fields := splitNUL(out)
+	for i := 0; i < len(fields); i++ {
+		status := strings.TrimSpace(fields[i])
+		if strings.HasPrefix(status, "R") && i+2 < len(fields) {
+			from, to := fields[i+1], nameAtHead(fields[i+2])
+			churn[to]++
+			renamedTo[from] = to
+			i += 2
+			continue
+		}
+		if i+1 < len(fields) {
+			churn[nameAtHead(fields[i+1])]++
+			i++
+		}
+	}
+	return churn, nil
 }
 
 func git(dir string, args ...string) ([]byte, error) {

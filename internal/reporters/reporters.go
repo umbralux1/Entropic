@@ -22,7 +22,8 @@ func JSON(w io.Writer, r scoring.Report) error {
 }
 
 // Text writes r as a terminal-friendly report: the Baseline, the Entropy
-// Score and Signal summaries, then the Units.
+// Score and Signal summaries, then the Units; test files follow in a
+// section of their own.
 func Text(w io.Writer, r scoring.Report) error {
 	var b strings.Builder
 	if r.Baseline == nil {
@@ -30,36 +31,47 @@ func Text(w io.Writer, r scoring.Report) error {
 	} else {
 		fmt.Fprintf(&b, "Baseline: %s (%s)\n\n", r.Baseline.Ref, shortCommit(r.Baseline.Commit))
 	}
+	if err := group(&b, r.Group); err != nil {
+		return err
+	}
+	// A group without files still has its repository Unit.
+	if len(r.Tests.Units) > 1 {
+		b.WriteString("\nTests\n\n")
+		if err := group(&b, r.Tests); err != nil {
+			return err
+		}
+	}
+	_, err := io.WriteString(w, b.String())
+	return err
+}
 
-	fmt.Fprintf(&b, "Entropy Score  %s\n", figure(r.EntropyScore))
-	signals := make([]string, 0, len(r.Signals))
-	for s := range r.Signals {
+// group writes one group's Entropy Score, Signal summaries and Units.
+func group(b *strings.Builder, g scoring.Group) error {
+	fmt.Fprintf(b, "Entropy Score  %s\n", figure(g.EntropyScore))
+	signals := make([]string, 0, len(g.Signals))
+	for s := range g.Signals {
 		signals = append(signals, string(s))
 	}
 	sort.Strings(signals)
 	for _, s := range signals {
-		fmt.Fprintf(&b, "%-14s %s\n", title(s), figure(r.Signals[scoring.Signal(s)]))
+		fmt.Fprintf(b, "%-14s %s\n", title(s), figure(g.Signals[scoring.Signal(s)]))
 	}
 
 	b.WriteString("\nUnits\n")
-	tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-	for _, u := range bySeverity(r.Units) {
+	tw := tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
+	for _, u := range bySeverity(g.Units) {
 		fmt.Fprintf(tw, "  %s\t%s\t%s\t", u.Kind, u.Name, location(u))
 		for _, s := range scoring.Signals {
 			fmt.Fprintf(tw, "%s %s\t", s, unitValue(u, s))
 		}
 		fmt.Fprintf(tw, "%s\n", u.Status)
 	}
-	if err := tw.Flush(); err != nil {
-		return err
-	}
-	_, err := io.WriteString(w, b.String())
-	return err
+	return tw.Flush()
 }
 
 // bySeverity returns units grouped by kind, finest first, and within a kind
-// ordered by weighted Signal Delta, largest first (by weighted Signal values
-// for a snapshot).
+// ordered by Signal Delta, largest first (by Signal values for a snapshot),
+// comparing Signals in reporting order.
 func bySeverity(units []scoring.Unit) []scoring.Unit {
 	rank := map[analysis.UnitKind]int{}
 	for _, u := range units {
@@ -73,19 +85,31 @@ func bySeverity(units []scoring.Unit) []scoring.Unit {
 		if rank[a.Kind] != rank[b.Kind] {
 			return rank[a.Kind] < rank[b.Kind]
 		}
-		if severity(a) != severity(b) {
-			return severity(a) > severity(b)
+		if c := compareValues(severity(a), severity(b)); c != 0 {
+			return c > 0
 		}
-		return a.Values.Weighted() > b.Values.Weighted()
+		return compareValues(a.Values, b.Values) > 0
 	})
 	return out
 }
 
-func severity(u scoring.Unit) float64 {
-	if u.Delta == nil {
-		return u.Values.Weighted()
+// compareValues orders Values by each Signal in reporting order: positive
+// when a is larger, negative when b is, zero when equal.
+func compareValues(a, b scoring.Values) int {
+	for _, s := range scoring.Signals {
+		if a[s] != b[s] {
+			return a[s] - b[s]
+		}
 	}
-	return u.Delta.Values.Weighted()
+	return 0
+}
+
+// severity is a Unit's Delta, or its values for a snapshot.
+func severity(u scoring.Unit) scoring.Values {
+	if u.Delta == nil {
+		return u.Values
+	}
+	return u.Delta.Values
 }
 
 func figure(f scoring.Figure) string {

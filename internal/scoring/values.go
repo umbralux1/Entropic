@@ -18,16 +18,12 @@ const (
 // Signals lists every Signal measured on Units, in reporting order.
 var Signals = []Signal{Complexity, Duplication}
 
-// weights are the provisional Signal weights in the Entropy Score. A
-// duplicated line weighs a tenth of a Complexity point.
-var weights = map[Signal]float64{Complexity: 1, Duplication: 0.1}
-
 // Values holds one value per Signal. A missing Signal reads as zero.
 type Values map[Signal]int
 
-// Weighted is the Values' contribution to the Entropy Score before
-// normalising by size.
-func (v Values) Weighted() float64 {
+// Weighted is the Values' contribution to the Entropy Score, before
+// normalising by size, with each Signal weighed by weights.
+func (v Values) Weighted(weights map[Signal]float64) float64 {
 	total := 0.0
 	for _, s := range Signals {
 		total += weights[s] * float64(v[s])
