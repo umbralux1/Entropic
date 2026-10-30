@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/umbralux1/entropic/internal/analysis"
+	"github.com/umbralux1/entropic/internal/signal"
 )
 
 // Status says how a Unit differs from its counterpart at the Baseline.
@@ -18,13 +19,23 @@ const (
 
 // UnitDelta is a Unit's change in value against the Baseline.
 type UnitDelta struct {
-	Lines      int `json:"lines"`
-	Complexity int `json:"complexity"`
+	Lines int `json:"lines"`
+	// Values are the change per Signal, written to JSON as one field per Signal.
+	Values Values `json:"-"`
 }
 
 // Compare returns current with every Unit marked and given its Delta against
 // the same Unit in baseline. Units only in baseline are appended as Removed.
+// Files baseline skipped as unparsable are listed in SkippedAtBaseline.
 func Compare(current, baseline Report) Report {
+	out := current
+	out.SkippedAtBaseline = append([]string{}, baseline.unparsable...)
+	out.Group = compareGroup(current.Group, baseline.Group)
+	out.Tests = compareGroup(current.Tests, baseline.Tests)
+	return out
+}
+
+func compareGroup(current, baseline Group) Group {
 	before := map[string]Unit{}
 	baseKeys := identities(baseline.Units)
 	for i, key := range baseKeys {
@@ -33,7 +44,7 @@ func Compare(current, baseline Report) Report {
 
 	out := current
 	out.EntropyScore = withDelta(current.EntropyScore, baseline.EntropyScore)
-	out.Signals = map[Signal]Figure{}
+	out.Signals = map[signal.Signal]Figure{}
 	for s, f := range current.Signals {
 		out.Signals[s] = withDelta(f, baseline.Signals[s])
 	}
@@ -42,11 +53,11 @@ func Compare(current, baseline Report) Report {
 		u := current.Units[i]
 		b, existed := before[key]
 		delete(before, key)
-		u.Delta = &UnitDelta{Lines: u.Lines - b.Lines, Complexity: u.Complexity - b.Complexity}
+		u.Delta = &UnitDelta{Lines: u.Lines - b.Lines, Values: u.Values.minus(b.Values)}
 		switch {
 		case !existed:
 			u.Status = Added
-		case *u.Delta != UnitDelta{}:
+		case u.Delta.Lines != 0 || !u.Delta.Values.isZero():
 			u.Status = Changed
 		default:
 			u.Status = Unchanged
@@ -59,9 +70,9 @@ func Compare(current, baseline Report) Report {
 			continue
 		}
 		u := b
-		u.Lines, u.Complexity = 0, 0
+		u.Lines, u.Values = 0, Values{}
 		u.Status = Removed
-		u.Delta = &UnitDelta{Lines: -b.Lines, Complexity: -b.Complexity}
+		u.Delta = &UnitDelta{Lines: -b.Lines, Values: Values{}.minus(b.Values)}
 		out.Units = append(out.Units, u)
 	}
 	return out

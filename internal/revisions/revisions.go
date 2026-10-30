@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // --base values with special meaning.
@@ -34,8 +36,8 @@ type File struct {
 // Baseline is the commit a measurement is compared against. Ref says how it
 // was chosen.
 type Baseline struct {
-	Ref    string
-	Commit string
+	Ref    string `json:"ref"`
+	Commit string `json:"commit"`
 }
 
 // Resolve turns a --base value into a Baseline, or nil for None.
@@ -119,6 +121,118 @@ func AtCommit(dir, commit string, want func(path string) bool) ([]File, error) {
 		files = append(files, File{Path: path, Source: source})
 	}
 	return files, nil
+}
+
+// ChangedLines returns, per file want accepts, how many lines were added
+// plus deleted between commit and the working tree, untracked files
+// included. A renamed file counts as deleted at its old path and added at
+// its new one.
+func ChangedLines(dir, commit string, want func(path string) bool) (map[string]int, error) {
+	out, err := git(dir, "diff", "--numstat", "-z", "--no-renames", commit, "--")
+	if err != nil {
+		return nil, fmt.Errorf("diff against %s: %w", commit, err)
+	}
+	changed := map[string]int{}
+	for _, record := range splitNUL(out) {
+		// Each record is "added\tdeleted\tpath"; binary files show "-".
+		fields := strings.SplitN(record, "\t", 3)
+		if len(fields) != 3 || !want(fields[2]) {
+			continue
+		}
+		added, errA := strconv.Atoi(fields[0])
+		deleted, errD := strconv.Atoi(fields[1])
+		if errA != nil || errD != nil {
+			continue
+		}
+		changed[fields[2]] += added + deleted
+	}
+
+	out, err = git(dir, "ls-files", "-z", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, fmt.Errorf("list untracked files: %w", err)
+	}
+	for _, path := range splitNUL(out) {
+		if !want(path) {
+			continue
+		}
+		source, err := os.ReadFile(filepath.Join(dir, path))
+		if err != nil {
+			return nil, err
+		}
+		changed[path] += countLines(source)
+	}
+	return changed, nil
+}
+
+// Renames returns the files git detects as renamed between commit and the
+// working tree, mapping each old path to its new one. Renames of untracked
+// files are not detected: git sees only a deletion.
+func Renames(dir, commit string) (map[string]string, error) {
+	out, err := git(dir, "diff", "-z", "--name-status", "-M", commit, "--")
+	if err != nil {
+		return nil, fmt.Errorf("find renames since %s: %w", commit, err)
+	}
+	renames := map[string]string{}
+	fields := splitNUL(out)
+	for i := 0; i < len(fields); i++ {
+		// A rename is "R<similarity>\0old\0new"; every other change "X\0path".
+		if strings.HasPrefix(fields[i], "R") && i+2 < len(fields) {
+			renames[fields[i+1]] = fields[i+2]
+			i += 2
+			continue
+		}
+		i++
+	}
+	return renames, nil
+}
+
+// countLines counts lines the way git does, including a final line without
+// a newline.
+func countLines(source []byte) int {
+	n := bytes.Count(source, []byte("\n"))
+	if len(source) > 0 && source[len(source)-1] != '\n' {
+		n++
+	}
+	return n
+}
+
+// Churn counts, per file path at HEAD, the non-merge commits reachable from
+// HEAD that changed the file and were committed after since. Changes made
+// under an earlier name count towards the file's name at HEAD.
+func Churn(dir string, since time.Time) (map[string]int, error) {
+	churn := map[string]int{}
+	if _, err := git(dir, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
+		return churn, nil // no commits yet: no history
+	}
+	out, err := git(dir, "log", "-z", "--format=", "--name-status", "-M", "--no-merges",
+		"--since="+since.Format(time.RFC3339), "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("read history for Churn: %w", err)
+	}
+	// Walk newest first, remembering which later name each earlier name became.
+	renamedTo := map[string]string{}
+	nameAtHead := func(path string) string {
+		if later, ok := renamedTo[path]; ok {
+			return later
+		}
+		return path
+	}
+	fields := splitNUL(out)
+	for i := 0; i < len(fields); i++ {
+		status := strings.TrimSpace(fields[i])
+		if strings.HasPrefix(status, "R") && i+2 < len(fields) {
+			from, to := fields[i+1], nameAtHead(fields[i+2])
+			churn[to]++
+			renamedTo[from] = to
+			i += 2
+			continue
+		}
+		if i+1 < len(fields) {
+			churn[nameAtHead(fields[i+1])]++
+			i++
+		}
+	}
+	return churn, nil
 }
 
 func git(dir string, args ...string) ([]byte, error) {

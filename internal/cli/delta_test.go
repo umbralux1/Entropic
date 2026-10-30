@@ -211,3 +211,79 @@ func TestDefaultBaseInRepoWithoutCommitsIsASnapshot(t *testing.T) {
 		t.Errorf("repository Complexity: want 4, got %d", got)
 	}
 }
+
+// elevenIfs is a function with Complexity 11, one flat if per line, over
+// the default Complexity threshold of 10 were it counted as added.
+var elevenIfs = "package a\n\nfunc Many(x int) int {\n" +
+	strings.Repeat("\tif x > 0 {\n\t\tx--\n\t}\n", 11) + "\treturn x\n}\n"
+
+func TestRenamedFileHasZeroDelta(t *testing.T) {
+	repo := testrepo.New(t).Write("a/x.go", elevenIfs).Commit("add x").Move("a/x.go", "a/y.go")
+
+	r := repo.Run("--base", "HEAD").Report(0)
+
+	for _, u := range r.Units {
+		if u.Status != "unchanged" || u.Delta != (testrepo.ReportDelta{}) {
+			t.Errorf("a pure rename should change nothing; got %+v", u)
+		}
+	}
+	if f := r.Unit(t, "file", "a/y.go"); f.Complexity != 11 {
+		t.Errorf("a/y.go: want Complexity 11 under its new name, got %+v", f)
+	}
+}
+
+func TestRenamedAndEditedFileShowsOnlyTheEdit(t *testing.T) {
+	repo := testrepo.New(t).Write("a/x.go", elevenIfs).Commit("add x").Move("a/x.go", "a/y.go").
+		Write("a/y.go", strings.Replace(elevenIfs, "\treturn x\n", "\tif x > 9 {\n\t\tx--\n\t}\n\treturn x\n", 1))
+
+	r := repo.Run("--base", "HEAD").Report(0)
+
+	// One more flat if: Complexity +1, lines +3.
+	if m := r.Unit(t, "function", "Many"); m.Status != "changed" || m.Delta != (testrepo.ReportDelta{Complexity: 1, Lines: 3}) {
+		t.Errorf("Many: want changed by complexity +1, lines +3; got %+v", m)
+	}
+}
+
+func TestDeletingOneOfTwoSameNamedMethodsMarksOnlyThatMethodRemoved(t *testing.T) {
+	repo := testrepo.New(t).Write("shapes/shapes.go", `package shapes
+
+type A struct{}
+
+func (A) M() int {
+	return 1
+}
+
+type B struct{}
+
+func (*B) M() int {
+	if true {
+		return 2
+	}
+	return 0
+}
+`).Commit("add shapes").Write("shapes/shapes.go", `package shapes
+
+type A struct{}
+
+type B struct{}
+
+func (*B) M() int {
+	if true {
+		return 2
+	}
+	return 0
+}
+`)
+
+	r := repo.Run("--format", "json").Report(0)
+
+	if a := r.Unit(t, "function", "A.M"); a.Status != "removed" {
+		t.Errorf("A.M: want removed, got %+v", a)
+	}
+	if b := r.Unit(t, "function", "B.M"); b.Status != "unchanged" {
+		t.Errorf("B.M: want unchanged, got %+v", b)
+	}
+	if fns := r.UnitsOfKind("function"); len(fns) != 2 {
+		t.Errorf("want exactly A.M and B.M, got %+v", fns)
+	}
+}

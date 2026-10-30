@@ -176,12 +176,15 @@ func TestSnapshotReportsGoFunctionComplexityAsJSON(t *testing.T) {
 
 	r := repo.Run("--base", "none", "--format", "json").Report(0)
 
-	if r.SchemaVersion != 1 {
-		t.Errorf("schemaVersion: want 1, got %d", r.SchemaVersion)
+	if r.SchemaVersion != 2 {
+		t.Errorf("schemaVersion: want 2, got %d", r.SchemaVersion)
 	}
+	// Units are in severity order: in a snapshot, the larger weighted value first.
 	want := []testrepo.ReportUnit{
-		{Kind: "function", Name: "Sign", Path: "calc/calc.go", Module: "calc", StartLine: 3, EndLine: 8, Lines: 6, Complexity: 1},
-		{Kind: "function", Name: "SumPositive", Path: "calc/calc.go", Module: "calc", StartLine: 10, EndLine: 18, Lines: 9, Complexity: 3},
+		{Kind: "function", Name: "SumPositive", Path: "calc/calc.go", Module: "calc", StartLine: 10, EndLine: 18, Lines: 9, Complexity: 3,
+			Informational: testrepo.ReportInformational{Cyclomatic: 3}}, // 1 + for + if
+		{Kind: "function", Name: "Sign", Path: "calc/calc.go", Module: "calc", StartLine: 3, EndLine: 8, Lines: 6, Complexity: 1,
+			Informational: testrepo.ReportInformational{Cyclomatic: 2}}, // 1 + if
 	}
 	fns := r.UnitsOfKind("function")
 	if len(fns) != len(want) {
@@ -190,6 +193,38 @@ func TestSnapshotReportsGoFunctionComplexityAsJSON(t *testing.T) {
 	for i, w := range want {
 		if fns[i] != w {
 			t.Errorf("function %d: want %+v, got %+v", i, w, fns[i])
+		}
+	}
+}
+
+func TestCyclomaticComplexityIsInformationalOnly(t *testing.T) {
+	repo := testrepo.New(t).Write("words.go", `package words
+
+func Words(n int) string {
+	switch n { // Complexity +1; cyclomatic +1 per case
+	case 1:
+		return "one"
+	case 2:
+		return "a couple"
+	case 3:
+		return "a few"
+	default:
+		return "lots"
+	}
+}
+`).Commit("add words")
+
+	r := repo.Run("--base", "none", "--format", "json").Report(0)
+
+	if w := r.Unit(t, "function", "Words"); w.Complexity != 1 || w.Informational.Cyclomatic != 4 {
+		t.Errorf("Words: want Complexity 1 and informational cyclomatic 4, got %+v", w)
+	}
+	if c := r.Signals["complexity"].Value; c != 1 {
+		t.Errorf("complexity Signal: want 1, unaffected by cyclomatic; got %v", c)
+	}
+	for _, u := range r.Units {
+		if u.Kind != "function" && u.Informational != (testrepo.ReportInformational{}) {
+			t.Errorf("informational values belong to functions only, not rolled up: %+v", u)
 		}
 	}
 }
