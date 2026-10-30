@@ -4,6 +4,7 @@ package scoring
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -28,6 +29,9 @@ type Report struct {
 	SchemaVersion int `json:"schemaVersion"`
 	// Baseline is nil for a snapshot.
 	Baseline *Baseline `json:"baseline"`
+	// SkippedAtBaseline are the files left out of the Baseline because they
+	// failed to parse there; empty for a snapshot.
+	SkippedAtBaseline []string `json:"skippedAtBaseline"`
 	Group
 	Tests Group `json:"tests"`
 	// ChurnWindowDays is the history window Hotspot Churn was counted over.
@@ -39,6 +43,9 @@ type Report struct {
 	Scatter *scatter.Scatter `json:"scatter,omitempty"`
 	// Violations are the thresholds the change exceeded; none for a snapshot.
 	Violations []Violation `json:"violations"`
+
+	// unparsable are the files skipped because they failed to parse.
+	unparsable []string
 }
 
 // Group is the measurement of one group of files, rolled up to its own
@@ -96,45 +103,68 @@ type Informational struct {
 
 const schemaVersion = 1
 
-// Measure analyses files, splitting production code from tests. weights
-// weigh each Signal in the Entropy Score; duplicateMinLines is the smallest
-// clone reported, in lines holding code.
-func Measure(files []SourceFile, weights map[Signal]float64, duplicateMinLines int) (Report, error) {
-	var production, tests []SourceFile
+// Options configure a measurement.
+type Options struct {
+	// Weights weigh each Signal in the Entropy Score.
+	Weights map[Signal]float64
+	// DuplicateMinLines is the smallest clone reported, in lines holding code.
+	DuplicateMinLines int
+	// SkipUnparsable leaves out files that fail to parse, as Compare then
+	// reports, instead of failing the measurement.
+	SkipUnparsable bool
+}
+
+// Measure analyses files, splitting production code from tests.
+func Measure(files []SourceFile, opts Options) (Report, error) {
+	r := Report{SchemaVersion: schemaVersion, SkippedAtBaseline: []string{}}
+	var production, tests []analysedFile
 	for _, f := range files {
+		a, err := analyse(f, opts.DuplicateMinLines)
+		var syntax *analysis.SyntaxError
+		if opts.SkipUnparsable && errors.As(err, &syntax) {
+			r.unparsable = append(r.unparsable, f.Path)
+			continue
+		}
+		if err != nil {
+			return Report{}, fmt.Errorf("%s: %w", f.Path, err)
+		}
 		if f.Test {
-			tests = append(tests, f)
+			tests = append(tests, a)
 		} else {
-			production = append(production, f)
+			production = append(production, a)
 		}
 	}
-	r := Report{SchemaVersion: schemaVersion}
-	var err error
-	if r.Group, err = measureGroup(production, weights, duplicateMinLines); err != nil {
-		return Report{}, err
-	}
-	if r.Tests, err = measureGroup(tests, weights, duplicateMinLines); err != nil {
-		return Report{}, err
-	}
+	r.Group = measureGroup(production, opts.Weights)
+	r.Tests = measureGroup(tests, opts.Weights)
 	return r, nil
+}
+
+// Unparsable returns the files Measure skipped because they failed to parse.
+func (r Report) Unparsable() []string {
+	return r.unparsable
+}
+
+// analyse finds a file's function and class Units and its fragments that
+// Duplication compares.
+func analyse(f SourceFile, duplicateMinLines int) (analysedFile, error) {
+	units, err := analysis.Analyze(f.Source, f.Language)
+	if err != nil {
+		return analysedFile{}, err
+	}
+	fragments, err := analysis.Fragments(f.Source, f.Language, duplicateMinLines)
+	if err != nil {
+		return analysedFile{}, err
+	}
+	return analysedFile{SourceFile: f, units: units, fragments: fragments,
+		lines: bytes.Split(bytes.TrimSuffix(f.Source, []byte("\n")), []byte("\n"))}, nil
 }
 
 // measureGroup returns the Units of files: functions, then classes, then
 // files, then Modules, then the repository. Clones are sought within the group.
-func measureGroup(files []SourceFile, weights map[Signal]float64, duplicateMinLines int) (Group, error) {
-	analysed := make([]analysedFile, len(files))
+func measureGroup(analysed []analysedFile, weights map[Signal]float64) Group {
 	fragments := map[string][]analysis.Fragment{}
-	for i, f := range files {
-		units, err := analysis.Analyze(f.Source, f.Language)
-		if err != nil {
-			return Group{}, fmt.Errorf("%s: %w", f.Path, err)
-		}
-		fragments[f.Path], err = analysis.Fragments(f.Source, f.Language, duplicateMinLines)
-		if err != nil {
-			return Group{}, fmt.Errorf("%s: %w", f.Path, err)
-		}
-		analysed[i] = analysedFile{SourceFile: f, units: units,
-			lines: bytes.Split(bytes.TrimSuffix(f.Source, []byte("\n")), []byte("\n"))}
+	for _, f := range analysed {
+		fragments[f.Path] = f.fragments
 	}
 	clones := duplication.Find(fragments)
 	cloned := clonedLines(clones)
@@ -198,14 +228,15 @@ func measureGroup(files []SourceFile, weights map[Signal]float64, duplicateMinLi
 		Signals:      signals,
 		Units:        units,
 		CloneGroups:  clones,
-	}, nil
+	}
 }
 
 // analysedFile is a source file with its function Units and its lines.
 type analysedFile struct {
 	SourceFile
-	units []analysis.Unit
-	lines [][]byte
+	units     []analysis.Unit
+	fragments []analysis.Fragment
+	lines     [][]byte
 }
 
 // duplicated counts the non-blank lines from start to end that lie in a clone.

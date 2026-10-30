@@ -215,3 +215,25 @@ func TestSourceThatFailsToParseExits2NamingTheFile(t *testing.T) {
 		t.Errorf("want exit 2 and an error naming calc/broken.go; got %d, stdout %q, stderr %q", res.Code, res.Stdout, res.Stderr)
 	}
 }
+
+func TestSourceThatFailedToParseAtTheBaselineIsSkippedWithAWarning(t *testing.T) {
+	repo := testrepo.New(t).
+		Write("calc/calc.go", calcGo).
+		Write("broken.py", "def broken(:\n    pass\n").
+		Commit("add calc and a broken script").
+		Remove("broken.py")
+
+	res := repo.Run("--base", "HEAD")
+	r := res.Report(0)
+
+	if !strings.Contains(res.Stderr, "broken.py") {
+		t.Errorf("want a warning naming broken.py on stderr, got %q", res.Stderr)
+	}
+	if strings.Join(r.SkippedAtBaseline, ",") != "broken.py" {
+		t.Errorf("skippedAtBaseline: want [broken.py], got %v", r.SkippedAtBaseline)
+	}
+	// calc.go parsed at both revisions and did not change.
+	if u := r.Unit(t, "file", "calc/calc.go"); u.Status != "unchanged" {
+		t.Errorf("calc/calc.go: want unchanged, got %+v", u)
+	}
+}

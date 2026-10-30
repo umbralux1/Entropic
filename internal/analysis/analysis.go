@@ -103,19 +103,41 @@ func (l Language) Vendored(path string) bool {
 	return false
 }
 
-// Analyze parses source in the given language and returns its function and
-// class Units in source order.
-func Analyze(source []byte, lang Language) ([]Unit, error) {
+// SyntaxError is source that does not parse in its language.
+type SyntaxError struct {
+	// Line is the 1-based line of the first error.
+	Line int
+}
+
+func (e *SyntaxError) Error() string {
+	return fmt.Sprintf("syntax error at line %d", e.Line)
+}
+
+// parse parses source in the given language, failing with a *SyntaxError
+// if any of it does not parse. The caller closes the tree.
+func parse(source []byte, lang Language) (*sitter.Tree, error) {
 	parser := sitter.NewParser()
 	defer parser.Close()
 	if err := parser.SetLanguage(lang.Grammar); err != nil {
 		return nil, fmt.Errorf("set %s grammar: %w", lang.Name, err)
 	}
 	tree := parser.Parse(source, nil)
-	defer tree.Close()
 	if root := tree.RootNode(); root.HasError() {
-		return nil, fmt.Errorf("syntax error at line %d", firstError(root).StartPosition().Row+1)
+		line := int(firstError(root).StartPosition().Row) + 1
+		tree.Close()
+		return nil, &SyntaxError{Line: line}
 	}
+	return tree, nil
+}
+
+// Analyze parses source in the given language and returns its function and
+// class Units in source order.
+func Analyze(source []byte, lang Language) ([]Unit, error) {
+	tree, err := parse(source, lang)
+	if err != nil {
+		return nil, err
+	}
+	defer tree.Close()
 
 	var units []Unit
 	// visit appends the Units n forms and contains, and returns the

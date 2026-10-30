@@ -52,7 +52,7 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
 		return ExitError
 	}
-	r, err := measure(dir, *base, cfg)
+	r, err := measure(dir, *base, cfg, stderr)
 	if err == nil {
 		r, err = withHotspots(dir, r, cfg.ChurnWindowDays, signalWeights(cfg))
 	}
@@ -83,7 +83,7 @@ func withHotspots(dir string, r scoring.Report, windowDays int, weights map[scor
 // measure measures the working tree and, unless base is none, compares it
 // against the Baseline. Both are measured with the current config, so the
 // Delta reflects the code alone.
-func measure(dir, base string, cfg config.Config) (scoring.Report, error) {
+func measure(dir, base string, cfg config.Config, stderr io.Writer) (scoring.Report, error) {
 	weights := signalWeights(cfg)
 	inScope := func(path string) bool {
 		lang, ok := language.ForPath(path)
@@ -97,7 +97,8 @@ func measure(dir, base string, cfg config.Config) (scoring.Report, error) {
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	current, err := scoring.Measure(sourceFiles(nowFiles), weights, cfg.DuplicateMinLines)
+	opts := scoring.Options{Weights: weights, DuplicateMinLines: cfg.DuplicateMinLines}
+	current, err := scoring.Measure(sourceFiles(nowFiles), opts)
 	if err != nil || baseline == nil {
 		return current, err
 	}
@@ -106,9 +107,15 @@ func measure(dir, base string, cfg config.Config) (scoring.Report, error) {
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	before, err := scoring.Measure(sourceFiles(baseFiles), weights, cfg.DuplicateMinLines)
+	// Code that no longer parses is an error now, but at the Baseline it is
+	// history the change cannot fix, so it is skipped.
+	opts.SkipUnparsable = true
+	before, err := scoring.Measure(sourceFiles(baseFiles), opts)
 	if err != nil {
 		return scoring.Report{}, fmt.Errorf("at Baseline %s: %w", baseline.Ref, err)
+	}
+	for _, path := range before.Unparsable() {
+		fmt.Fprintf(stderr, "entropic: warning: skipped %s at Baseline %s: it does not parse\n", path, baseline.Ref)
 	}
 	r := scoring.Compare(current, before)
 	r.Baseline = &scoring.Baseline{Ref: baseline.Ref, Commit: baseline.Commit}

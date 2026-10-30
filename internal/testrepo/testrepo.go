@@ -102,6 +102,8 @@ type Result struct {
 type Report struct {
 	SchemaVersion int             `json:"schemaVersion"`
 	Baseline      *ReportBaseline `json:"baseline"`
+	// SkippedAtBaseline are files that failed to parse at the Baseline.
+	SkippedAtBaseline []string `json:"skippedAtBaseline"`
 	ReportGroup
 	Tests       *ReportGroup      `json:"tests"`
 	ChurnWindow int               `json:"churnWindowDays"`

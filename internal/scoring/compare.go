@@ -25,8 +25,10 @@ type UnitDelta struct {
 
 // Compare returns current with every Unit marked and given its Delta against
 // the same Unit in baseline. Units only in baseline are appended as Removed.
+// Files baseline skipped as unparsable are listed in SkippedAtBaseline.
 func Compare(current, baseline Report) Report {
 	out := current
+	out.SkippedAtBaseline = append([]string{}, baseline.unparsable...)
 	out.Group = compareGroup(current.Group, baseline.Group)
 	out.Tests = compareGroup(current.Tests, baseline.Tests)
 	return out
