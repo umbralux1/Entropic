@@ -11,6 +11,24 @@ import (
 	"github.com/umbralux1/entropic/internal/scoring"
 )
 
+// unitSignal is a Signal measured on Units, judged on the kind of Unit that
+// best owns it.
+type unitSignal struct {
+	signal    scoring.Signal
+	kind      analysis.UnitKind
+	threshold scoring.Threshold
+	limit     func(config.Thresholds) float64
+}
+
+// unitSignals judges Complexity on functions, and Duplication on files,
+// which also count cloned lines outside functions.
+var unitSignals = []unitSignal{
+	{scoring.Complexity, analysis.Function, scoring.ComplexityThreshold,
+		func(t config.Thresholds) float64 { return t.Complexity }},
+	{scoring.Duplication, analysis.File, scoring.DuplicationThreshold,
+		func(t config.Thresholds) float64 { return t.Duplication }},
+}
+
 // Evaluate returns the thresholds r's production code exceeds. A snapshot
 // has no Delta, so it exceeds none.
 func Evaluate(r scoring.Report, t config.Thresholds) []scoring.Violation {
@@ -18,8 +36,10 @@ func Evaluate(r scoring.Report, t config.Thresholds) []scoring.Violation {
 	if r.Baseline == nil {
 		return violations
 	}
-	if v, ok := complexity(r.Units, t.Complexity); ok {
-		violations = append(violations, v)
+	for _, s := range unitSignals {
+		if v, ok := s.evaluate(r.Units, s.limit(t)); ok {
+			violations = append(violations, v)
+		}
 	}
 	if v, ok := scatterOverBudget(r.Scatter, t.Scatter); ok {
 		violations = append(violations, v)
@@ -30,22 +50,37 @@ func Evaluate(r scoring.Report, t config.Thresholds) []scoring.Violation {
 	return violations
 }
 
-// complexity is violated by every function gaining more than limit.
-func complexity(units []scoring.Unit, limit float64) (scoring.Violation, bool) {
-	over := gainers(units, limit)
+// evaluate is violated by every Unit of s's kind gaining more than limit.
+func (s unitSignal) evaluate(units []scoring.Unit, limit float64) (scoring.Violation, bool) {
+	over := s.gainers(units, limit)
 	if len(over) == 0 {
 		return scoring.Violation{}, false
 	}
 	return scoring.Violation{
-		Threshold: scoring.ComplexityThreshold,
+		Threshold: s.threshold,
 		Limit:     limit,
-		Value:     float64(over[0].Delta.Values[scoring.Complexity]),
+		Value:     float64(over[0].Delta.Values[s.signal]),
 		Units:     refs(over),
 	}, true
 }
 
-// scatterOverBudget is violated when a change touches more than limit Modules beyond
-// its Scatter Budget. Every Module it touches is responsible.
+// gainers returns the Units of s's kind that gained more than limit in s,
+// largest gain first.
+func (s unitSignal) gainers(units []scoring.Unit, limit float64) []scoring.Unit {
+	var out []scoring.Unit
+	for _, u := range units {
+		if u.Kind == s.kind && float64(u.Delta.Values[s.signal]) > limit {
+			out = append(out, u)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Delta.Values[s.signal] > out[j].Delta.Values[s.signal]
+	})
+	return out
+}
+
+// scatterOverBudget is violated when a change touches more than limit
+// Modules beyond its Scatter Budget. Every Module it touches is responsible.
 func scatterOverBudget(s *scatter.Scatter, limit float64) (scoring.Violation, bool) {
 	if s == nil {
 		return scoring.Violation{}, false
@@ -62,14 +97,17 @@ func scatterOverBudget(s *scatter.Scatter, limit float64) (scoring.Violation, bo
 }
 
 // entropyScore is violated when the Entropy Score rises by more than limit.
-// The functions that gained Complexity are responsible; if none did, the
-// rise comes from code removed around them, so the changed files are.
+// The Units that gained in any Signal are responsible; if none did, the rise
+// comes from code removed around them, so the changed files are.
 func entropyScore(g scoring.Group, limit float64) (scoring.Violation, bool) {
 	rise := *g.EntropyScore.Delta
 	if rise <= limit {
 		return scoring.Violation{}, false
 	}
-	responsible := gainers(g.Units, 0)
+	var responsible []scoring.Unit
+	for _, s := range unitSignals {
+		responsible = append(responsible, s.gainers(g.Units, 0)...)
+	}
 	if len(responsible) == 0 {
 		for _, u := range g.Units {
 			if u.Kind == analysis.File && u.Status != scoring.Unchanged {
@@ -85,21 +123,7 @@ func entropyScore(g scoring.Group, limit float64) (scoring.Violation, bool) {
 	}, true
 }
 
-// gainers returns the functions that gained more than limit Complexity,
-// largest gain first.
-func gainers(units []scoring.Unit, limit float64) []scoring.Unit {
-	var out []scoring.Unit
-	for _, u := range units {
-		if u.Kind == analysis.Function && float64(u.Delta.Values[scoring.Complexity]) > limit {
-			out = append(out, u)
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].Delta.Values[scoring.Complexity] > out[j].Delta.Values[scoring.Complexity]
-	})
-	return out
-}
-
+// refs identifies units in order.
 func refs(units []scoring.Unit) []scoring.UnitRef {
 	out := make([]scoring.UnitRef, len(units))
 	for i, u := range units {

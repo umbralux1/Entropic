@@ -38,6 +38,8 @@ type Config struct {
 type Thresholds struct {
 	// Complexity is the most Complexity any one function may gain.
 	Complexity float64 `toml:"complexity"`
+	// Duplication is the most duplicated lines any one file may gain.
+	Duplication float64 `toml:"duplication"`
 	// EntropyScore is the most the Entropy Score may rise.
 	EntropyScore float64 `toml:"entropy_score"`
 	// Scatter is how many Modules a change may touch beyond its Scatter Budget.
@@ -52,7 +54,7 @@ func Default() Config {
 		Weights:           map[string]float64{"complexity": 1, "duplication": 0.1},
 		ChurnWindowDays:   90,
 		DuplicateMinLines: 6,
-		Thresholds:        Thresholds{Complexity: 10, EntropyScore: 10, Scatter: 0},
+		Thresholds:        Thresholds{Complexity: 10, Duplication: 20, EntropyScore: 10, Scatter: 0},
 	}
 }
 
@@ -104,6 +106,7 @@ func validate(cfg Config, meta toml.MetaData) error {
 	}
 	for name, limit := range map[string]float64{
 		"complexity":    cfg.Thresholds.Complexity,
+		"duplication":   cfg.Thresholds.Duplication,
 		"entropy_score": cfg.Thresholds.EntropyScore,
 		"scatter":       cfg.Thresholds.Scatter,
 	} {

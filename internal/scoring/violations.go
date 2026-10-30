@@ -7,6 +7,7 @@ type Threshold string
 
 const (
 	ComplexityThreshold   Threshold = "complexity"
+	DuplicationThreshold  Threshold = "duplication"
 	EntropyScoreThreshold Threshold = "entropyScore"
 	ScatterThreshold      Threshold = "scatter"
 )

@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"math"
+	"sort"
 	"strings"
 	"testing"
 
@@ -54,6 +55,32 @@ func TestComplexityOverThresholdIsAViolationNamingTheFunctionAndExits1(t *testin
 	}
 	if len(v.Units) != 1 || v.Units[0].Kind != "function" || v.Units[0].Name != "Sign" || v.Units[0].Path != "calc/calc.go" {
 		t.Errorf("complexity violation: want function Sign in calc/calc.go responsible; got %+v", v.Units)
+	}
+}
+
+func TestDuplicationOverThresholdNamesTheFilesThatGainedClonedLines(t *testing.T) {
+	repo := testrepo.New(t).
+		Write("calc/calc.go", calcGo).
+		Write("entropic.toml", "[thresholds]\nduplication = 5\nentropy_score = 100\n").
+		Commit("add calc").
+		Write("stats/stats.go", countAbove) // clones SumPositive: 9 lines in each file
+
+	r := repo.Run().Report(1)
+
+	v := r.Violation(t, "duplication")
+	if v.Limit != 5 || v.Value != 9 {
+		t.Errorf("duplication violation: want +9 over a limit of 5; got %+v", v)
+	}
+	var files []string
+	for _, u := range v.Units {
+		if u.Kind != "file" {
+			t.Errorf("duplication violation: want file Units, got %+v", u)
+		}
+		files = append(files, u.Path)
+	}
+	sort.Strings(files) // both gained 9: no order between them
+	if strings.Join(files, ",") != "calc/calc.go,stats/stats.go" {
+		t.Errorf("duplication violation: want calc/calc.go and stats/stats.go responsible; got %v", files)
 	}
 }
 

@@ -181,7 +181,11 @@ func TestLargeChangeAcrossFewModulesStaysWithinScatterBudget(t *testing.T) {
 		Write("b/big.go", bigFunc("b")).
 		Write("c/big.go", bigFunc("c")) // new, untracked files: 3 x 60 added lines
 
-	r := repo.Run("--format", "json").Report(0)
+	r := repo.Run("--format", "json").Report(1) // the copies of Big are clones, over the Duplication threshold
+
+	if len(r.Violations) != 1 || r.Violations[0].Threshold != "duplication" {
+		t.Errorf("want only a duplication violation, not scatter; got %+v", r.Violations)
+	}
 
 	// 3 Modules, 180 changed lines: budget 1 + log2(19) = 5.2479...
 	if s := r.Scatter; s == nil || s.Modules != 3 || s.ChangedLines != 180 ||
