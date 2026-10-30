@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/umbralux1/entropic/internal/analysis"
+	"github.com/umbralux1/entropic/internal/signal"
 )
 
 // Status says how a Unit differs from its counterpart at the Baseline.
@@ -25,8 +26,10 @@ type UnitDelta struct {
 
 // Compare returns current with every Unit marked and given its Delta against
 // the same Unit in baseline. Units only in baseline are appended as Removed.
+// Files baseline skipped as unparsable are listed in SkippedAtBaseline.
 func Compare(current, baseline Report) Report {
 	out := current
+	out.SkippedAtBaseline = append([]string{}, baseline.unparsable...)
 	out.Group = compareGroup(current.Group, baseline.Group)
 	out.Tests = compareGroup(current.Tests, baseline.Tests)
 	return out
@@ -41,7 +44,7 @@ func compareGroup(current, baseline Group) Group {
 
 	out := current
 	out.EntropyScore = withDelta(current.EntropyScore, baseline.EntropyScore)
-	out.Signals = map[Signal]Figure{}
+	out.Signals = map[signal.Signal]Figure{}
 	for s, f := range current.Signals {
 		out.Signals[s] = withDelta(f, baseline.Signals[s])
 	}

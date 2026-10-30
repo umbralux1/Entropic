@@ -31,7 +31,7 @@ func TestCopiedFunctionWithRenamedIdentifiersIsAClone(t *testing.T) {
 	r := repo.Run("--base", "none", "--format", "json").Report(0)
 
 	want := []testrepo.ReportCloneGroup{{Locations: []testrepo.ReportLocation{
-		{Path: "calc/calc.go", StartLine: 10, EndLine: 18},
+		{Path: "calc/calc.go", StartLine: 10, EndLine: 18, Original: true},
 		{Path: "stats/stats.go", StartLine: 3, EndLine: 11},
 	}}}
 	if !reflect.DeepEqual(r.CloneGroups, want) {
@@ -66,7 +66,7 @@ def sum_positive(xs):
 	r := repo.Run("--base", "none", "--format", "json").Report(0)
 
 	want := []testrepo.ReportCloneGroup{{Locations: []testrepo.ReportLocation{
-		{Path: "calc/calc.py", StartLine: 7, EndLine: 12},
+		{Path: "calc/calc.py", StartLine: 7, EndLine: 12, Original: true},
 		{Path: "stats/stats.py", StartLine: 1, EndLine: 6},
 	}}}
 	if !reflect.DeepEqual(r.CloneGroups, want) {
@@ -85,7 +85,7 @@ func TestCloneGroupListsEveryLocation(t *testing.T) {
 	r := repo.Run("--base", "none", "--format", "json").Report(0)
 
 	want := []testrepo.ReportCloneGroup{{Locations: []testrepo.ReportLocation{
-		{Path: "calc/calc.go", StartLine: 10, EndLine: 18},
+		{Path: "calc/calc.go", StartLine: 10, EndLine: 18, Original: true},
 		{Path: "stats/more.go", StartLine: 5, EndLine: 13}, // a comment and a blank line above
 		{Path: "stats/stats.go", StartLine: 3, EndLine: 11},
 	}}}
@@ -100,22 +100,23 @@ func TestDuplicateInUncommittedEditShowsPositiveDuplicationDelta(t *testing.T) {
 
 	r := repo.Run("--format", "json").Report(0)
 
-	// Duplication counts the non-blank lines inside clones, at every
-	// location: SumPositive 9 + CountAbove 9.
-	if d := r.Signals["duplication"]; d.Value != 18 || d.Delta != 18 {
-		t.Errorf("duplication Signal: want 18 (+18), got %+v", d)
+	// Duplication counts the non-blank lines inside additional copies only:
+	// SumPositive was there at the Baseline, so it is the original and adds
+	// nothing; CountAbove adds its 9 lines.
+	if d := r.Signals["duplication"]; d.Value != 9 || d.Delta != 9 {
+		t.Errorf("duplication Signal: want 9 (+9), got %+v", d)
 	}
 	cases := []struct {
 		kind, name, status string
 		duplication        int
 		delta              testrepo.ReportDelta
 	}{
-		{"function", "SumPositive", "changed", 9, testrepo.ReportDelta{Duplication: 9}},
+		{"function", "SumPositive", "unchanged", 0, testrepo.ReportDelta{}},
 		{"function", "Sign", "unchanged", 0, testrepo.ReportDelta{}},
 		{"function", "CountAbove", "added", 9, testrepo.ReportDelta{Duplication: 9, Complexity: 3, Lines: 9}},
-		{"file", "calc/calc.go", "changed", 9, testrepo.ReportDelta{Duplication: 9}},
+		{"file", "calc/calc.go", "unchanged", 0, testrepo.ReportDelta{}},
 		{"module", "stats", "added", 9, testrepo.ReportDelta{Duplication: 9, Complexity: 3, Lines: 10}},
-		{"repository", "", "changed", 18, testrepo.ReportDelta{Duplication: 18, Complexity: 3, Lines: 10}},
+		{"repository", "", "changed", 9, testrepo.ReportDelta{Duplication: 9, Complexity: 3, Lines: 10}},
 	}
 	for _, c := range cases {
 		u := r.Unit(t, c.kind, c.name)
@@ -123,6 +124,69 @@ func TestDuplicateInUncommittedEditShowsPositiveDuplicationDelta(t *testing.T) {
 			t.Errorf("%s %q: want %s, duplication %d, Delta %+v; got %+v",
 				c.kind, c.name, c.status, c.duplication, c.delta, u)
 		}
+	}
+}
+
+// twelveLines is a 12-line function, every line non-blank, in package z.
+const twelveLines = `package z
+
+func Tally(xs []int) (int, int) {
+	pos, neg := 0, 0
+	_ = xs
+	for _, x := range xs {
+		if x > 0 {
+			pos++
+		} else {
+			neg++
+		}
+	}
+	return pos, neg
+}
+`
+
+func TestCopyingAFunctionCountsOnlyTheCopy(t *testing.T) {
+	// The copy sorts before the original, which still keeps that role
+	// because only the original was there at the Baseline.
+	repo := testrepo.New(t).Write("z/z.go", twelveLines).Commit("add z").
+		// A trailing constant keeps the whole file from being one clone.
+		Write("a/a.go", "package a"+twelveLines[len("package z"):]+"\nconst A = 1\n")
+
+	r := repo.Run("--format", "json").Report(0)
+
+	if d := r.Signals["duplication"]; d.Value != 12 || d.Delta != 12 {
+		t.Errorf("duplication Signal: want 12 (+12), got %+v", d)
+	}
+	if f := r.Unit(t, "file", "a/a.go"); f.Duplication != 12 || f.Delta.Duplication != 12 {
+		t.Errorf("a/a.go: want the copy's 12 duplicated lines, got %+v", f)
+	}
+	if f := r.Unit(t, "file", "z/z.go"); f.Status != "unchanged" || f.Duplication != 0 {
+		t.Errorf("z/z.go: the untouched original should stay unchanged with no Duplication, got %+v", f)
+	}
+	want := []testrepo.ReportCloneGroup{{Locations: []testrepo.ReportLocation{
+		{Path: "a/a.go", StartLine: 3, EndLine: 14},
+		{Path: "z/z.go", StartLine: 3, EndLine: 14, Original: true},
+	}}}
+	if !reflect.DeepEqual(r.CloneGroups, want) {
+		t.Errorf("clone groups: want %+v, got %+v", want, r.CloneGroups)
+	}
+}
+
+func TestInASnapshotTheFirstLocationIsTheOriginal(t *testing.T) {
+	repo := testrepo.New(t).
+		Write("calc/calc.go", calcGo). // SumPositive: lines 10-18, first by path
+		Write("stats/stats.go", countAbove).
+		Commit("copy SumPositive")
+
+	r := repo.Run("--base", "none", "--format", "json").Report(0)
+
+	if f := r.Unit(t, "file", "calc/calc.go"); f.Duplication != 0 {
+		t.Errorf("calc/calc.go holds the original: want no Duplication, got %+v", f)
+	}
+	if f := r.Unit(t, "file", "stats/stats.go"); f.Duplication != 9 {
+		t.Errorf("stats/stats.go holds the copy: want Duplication 9, got %+v", f)
+	}
+	if locs := r.CloneGroups[0].Locations; !locs[0].Original || locs[1].Original {
+		t.Errorf("want calc/calc.go marked as the original, got %+v", locs)
 	}
 }
 

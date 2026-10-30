@@ -2,7 +2,6 @@ package analysis
 
 import (
 	"encoding/binary"
-	"fmt"
 	"hash/fnv"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -21,12 +20,10 @@ type Fragment struct {
 // subtree with tokens on at least minLines lines. A token is a leaf, or an
 // identifier or literal, which counts on its first line only.
 func Fragments(source []byte, lang Language, minLines int) ([]Fragment, error) {
-	parser := sitter.NewParser()
-	defer parser.Close()
-	if err := parser.SetLanguage(lang.Grammar); err != nil {
-		return nil, fmt.Errorf("set %s grammar: %w", lang.Name, err)
+	tree, err := parse(source, lang)
+	if err != nil {
+		return nil, err
 	}
-	tree := parser.Parse(source, nil)
 	defer tree.Close()
 
 	t := tokens{}
@@ -51,7 +48,7 @@ func Fragments(source []byte, lang Language, minLines int) ([]Fragment, error) {
 			s = span{first: -1}
 			var buf [8]byte
 			for i := uint(0); i < n.ChildCount(); i++ {
-				if lang.Unduplicable[n.Child(i).Kind()] {
+				if lang.IgnoredByDuplication[n.Child(i).Kind()] {
 					continue
 				}
 				child, cs := visit(n.Child(i))

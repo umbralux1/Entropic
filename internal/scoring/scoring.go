@@ -4,13 +4,16 @@ package scoring
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
 
 	"github.com/umbralux1/entropic/internal/analysis"
 	"github.com/umbralux1/entropic/internal/duplication"
+	"github.com/umbralux1/entropic/internal/revisions"
 	"github.com/umbralux1/entropic/internal/scatter"
+	"github.com/umbralux1/entropic/internal/signal"
 )
 
 // SourceFile is one file to measure. Path is slash-separated and relative to
@@ -27,27 +30,37 @@ type SourceFile struct {
 type Report struct {
 	SchemaVersion int `json:"schemaVersion"`
 	// Baseline is nil for a snapshot.
-	Baseline *Baseline `json:"baseline"`
+	Baseline *revisions.Baseline `json:"baseline"`
+	// SkippedAtBaseline are the files left out of the Baseline because they
+	// failed to parse there; empty for a snapshot.
+	SkippedAtBaseline []string `json:"skippedAtBaseline"`
 	Group
 	Tests Group `json:"tests"`
 	// ChurnWindowDays is the history window Hotspot Churn was counted over.
 	ChurnWindowDays int `json:"churnWindowDays"`
-	// Hotspots rank production file Units by entropy times Churn.
+	// Hotspots rank production file Units by weighted Signal total times Churn.
 	Hotspots []Hotspot `json:"hotspots"`
-	// Scatter is the Scatter of the change since the Baseline, test files
-	// included; nil for a snapshot.
+	// Scatter is the Scatter of the change since the Baseline in production
+	// code; nil for a snapshot.
 	Scatter *scatter.Scatter `json:"scatter,omitempty"`
 	// Violations are the thresholds the change exceeded; none for a snapshot.
 	Violations []Violation `json:"violations"`
+
+	// unparsable are the files skipped because they failed to parse.
+	unparsable []string
+	// shapes are the fragment shapes Duplication compared, per file path.
+	shapes map[string]map[uint64]bool
+	// weights weigh each Signal, as in the Entropy Score.
+	weights map[signal.Signal]float64
 }
 
 // Group is the measurement of one group of files, rolled up to its own
 // repository Unit.
 type Group struct {
 	// EntropyScore is the weighted Signal total per 100 non-blank lines.
-	EntropyScore Figure            `json:"entropyScore"`
-	Signals      map[Signal]Figure `json:"signals"`
-	Units        []Unit            `json:"units"`
+	EntropyScore Figure                   `json:"entropyScore"`
+	Signals      map[signal.Signal]Figure `json:"signals"`
+	Units        []Unit                   `json:"units"`
 	// CloneGroups are the structural clones found by Duplication.
 	CloneGroups []duplication.CloneGroup `json:"cloneGroups"`
 }
@@ -64,21 +77,13 @@ type Figure struct {
 	Delta *float64 `json:"delta,omitempty"`
 }
 
-// Baseline is the commit a report was compared against, and how it was chosen.
-type Baseline struct {
-	Ref    string `json:"ref"`
-	Commit string `json:"commit"`
-}
-
 // Unit is a measured Unit. Lines counts non-blank lines.
 type Unit struct {
-	Kind      analysis.UnitKind `json:"kind"`
-	Name      string            `json:"name"`
-	Path      string            `json:"path,omitempty"`
-	Module    string            `json:"module,omitempty"`
-	StartLine int               `json:"startLine,omitempty"`
-	EndLine   int               `json:"endLine,omitempty"`
-	Lines     int               `json:"lines"`
+	Kind analysis.UnitKind `json:"kind"`
+	Name string            `json:"name"`
+	analysis.Location
+	Module string `json:"module,omitempty"`
+	Lines  int    `json:"lines"`
 	// Values are the Unit's value per Signal, written to JSON as one field
 	// per Signal.
 	Values Values     `json:"-"`
@@ -94,49 +99,86 @@ type Informational struct {
 	Cyclomatic int `json:"cyclomatic"`
 }
 
-const schemaVersion = 1
+// schemaVersion is the version of the JSON report described in
+// docs/json-report.md. It changes when a field is removed or renamed.
+const schemaVersion = 2
 
-// Measure analyses files, splitting production code from tests. weights
-// weigh each Signal in the Entropy Score; duplicateMinLines is the smallest
-// clone reported, in lines holding code.
-func Measure(files []SourceFile, weights map[Signal]float64, duplicateMinLines int) (Report, error) {
-	var production, tests []SourceFile
+// Options configure a measurement.
+type Options struct {
+	// Weights weigh each Signal in the Entropy Score.
+	Weights map[signal.Signal]float64
+	// DuplicateMinLines is the smallest clone reported, in lines holding code.
+	DuplicateMinLines int
+	// SkipUnparsable leaves out files that fail to parse, as Compare then
+	// reports, instead of failing the measurement.
+	SkipUnparsable bool
+	// Baseline, when measuring against one, is the Baseline's measurement:
+	// a clone location already there is its group's original.
+	Baseline *Report
+}
+
+// Measure analyses files, splitting production code from tests.
+func Measure(files []SourceFile, opts Options) (Report, error) {
+	r := Report{SchemaVersion: schemaVersion, SkippedAtBaseline: []string{},
+		shapes: map[string]map[uint64]bool{}, weights: opts.Weights}
+	var production, tests []analysedFile
 	for _, f := range files {
+		a, err := analyse(f, opts.DuplicateMinLines)
+		var syntax *analysis.SyntaxError
+		if opts.SkipUnparsable && errors.As(err, &syntax) {
+			r.unparsable = append(r.unparsable, f.Path)
+			continue
+		}
+		if err != nil {
+			return Report{}, fmt.Errorf("%s: %w", f.Path, err)
+		}
+		r.shapes[f.Path] = map[uint64]bool{}
+		for _, fr := range a.fragments {
+			r.shapes[f.Path][fr.Shape] = true
+		}
 		if f.Test {
-			tests = append(tests, f)
+			tests = append(tests, a)
 		} else {
-			production = append(production, f)
+			production = append(production, a)
 		}
 	}
-	r := Report{SchemaVersion: schemaVersion}
-	var err error
-	if r.Group, err = measureGroup(production, weights, duplicateMinLines); err != nil {
-		return Report{}, err
+	var existed duplication.Existed
+	if b := opts.Baseline; b != nil {
+		existed = func(path string, shape uint64) bool { return b.shapes[path][shape] }
 	}
-	if r.Tests, err = measureGroup(tests, weights, duplicateMinLines); err != nil {
-		return Report{}, err
-	}
+	r.Group = measureGroup(production, opts.Weights, existed)
+	r.Tests = measureGroup(tests, opts.Weights, existed)
 	return r, nil
+}
+
+// Unparsable returns the files Measure skipped because they failed to parse.
+func (r Report) Unparsable() []string {
+	return r.unparsable
+}
+
+// analyse finds a file's function and class Units and its fragments that
+// Duplication compares.
+func analyse(f SourceFile, duplicateMinLines int) (analysedFile, error) {
+	units, err := analysis.Analyze(f.Source, f.Language)
+	if err != nil {
+		return analysedFile{}, err
+	}
+	fragments, err := analysis.Fragments(f.Source, f.Language, duplicateMinLines)
+	if err != nil {
+		return analysedFile{}, err
+	}
+	return analysedFile{SourceFile: f, units: units, fragments: fragments,
+		lines: bytes.Split(bytes.TrimSuffix(f.Source, []byte("\n")), []byte("\n"))}, nil
 }
 
 // measureGroup returns the Units of files: functions, then classes, then
 // files, then Modules, then the repository. Clones are sought within the group.
-func measureGroup(files []SourceFile, weights map[Signal]float64, duplicateMinLines int) (Group, error) {
-	analysed := make([]analysedFile, len(files))
+func measureGroup(analysed []analysedFile, weights map[signal.Signal]float64, existed duplication.Existed) Group {
 	fragments := map[string][]analysis.Fragment{}
-	for i, f := range files {
-		units, err := analysis.Analyze(f.Source, f.Language)
-		if err != nil {
-			return Group{}, fmt.Errorf("%s: %w", f.Path, err)
-		}
-		fragments[f.Path], err = analysis.Fragments(f.Source, f.Language, duplicateMinLines)
-		if err != nil {
-			return Group{}, fmt.Errorf("%s: %w", f.Path, err)
-		}
-		analysed[i] = analysedFile{SourceFile: f, units: units,
-			lines: bytes.Split(bytes.TrimSuffix(f.Source, []byte("\n")), []byte("\n"))}
+	for _, f := range analysed {
+		fragments[f.Path] = f.fragments
 	}
-	clones := duplication.Find(fragments)
+	clones := duplication.Find(fragments, existed)
 	cloned := clonedLines(clones)
 
 	var functions, classes, fileUnits []Unit
@@ -144,24 +186,25 @@ func measureGroup(files []SourceFile, weights map[Signal]float64, duplicateMinLi
 	repo := Unit{Kind: analysis.Repository, Values: Values{}}
 	for _, f := range analysed {
 		module := ModuleOf(f.Path)
-		file := Unit{Kind: analysis.File, Name: f.Path, Path: f.Path, Module: module,
-			StartLine: 1, EndLine: len(f.lines), Lines: nonBlank(f.lines),
-			Values: Values{Duplication: f.duplicated(cloned[f.Path], 1, len(f.lines))}}
+		file := Unit{Kind: analysis.File, Name: f.Path, Module: module,
+			Location: analysis.Location{Path: f.Path, StartLine: 1, EndLine: len(f.lines)},
+			Lines:    nonBlank(f.lines),
+			Values:   Values{signal.Duplication: f.duplicated(cloned[f.Path], 1, len(f.lines))}}
 		for _, u := range f.units {
 			unit := Unit{
-				Kind: u.Kind, Name: u.Name, Path: f.Path, Module: module,
-				StartLine: u.StartLine, EndLine: u.EndLine,
-				Lines: nonBlank(f.lines[u.StartLine-1 : u.EndLine]),
+				Kind: u.Kind, Name: u.Name, Module: module,
+				Location: analysis.Location{Path: f.Path, StartLine: u.StartLine, EndLine: u.EndLine},
+				Lines:    nonBlank(f.lines[u.StartLine-1 : u.EndLine]),
 				Values: Values{
-					Complexity:  u.Complexity,
-					Duplication: f.duplicated(cloned[f.Path], u.StartLine, u.EndLine),
+					signal.Complexity:  u.Complexity,
+					signal.Duplication: f.duplicated(cloned[f.Path], u.StartLine, u.EndLine),
 				},
 			}
 			// A class already rolls up the functions it encloses, so only
 			// functions roll up into the file.
 			if u.Kind == analysis.Function {
 				unit.Informational = &Informational{Cyclomatic: u.Cyclomatic}
-				file.Values[Complexity] += u.Complexity
+				file.Values[signal.Complexity] += u.Complexity
 				functions = append(functions, unit)
 			} else {
 				classes = append(classes, unit)
@@ -171,7 +214,7 @@ func measureGroup(files []SourceFile, weights map[Signal]float64, duplicateMinLi
 
 		m, ok := modules[module]
 		if !ok {
-			m = &Unit{Kind: analysis.Module, Name: module, Path: module, Values: Values{}}
+			m = &Unit{Kind: analysis.Module, Name: module, Location: analysis.Location{Path: module}, Values: Values{}}
 			modules[module] = m
 		}
 		m.add(file)
@@ -189,8 +232,8 @@ func measureGroup(files []SourceFile, weights map[Signal]float64, duplicateMinLi
 	}
 	units = append(units, repo)
 
-	signals := map[Signal]Figure{}
-	for _, s := range Signals {
+	signals := map[signal.Signal]Figure{}
+	for _, s := range signal.OfCode {
 		signals[s] = Figure{Value: float64(repo.Values[s])}
 	}
 	return Group{
@@ -198,14 +241,15 @@ func measureGroup(files []SourceFile, weights map[Signal]float64, duplicateMinLi
 		Signals:      signals,
 		Units:        units,
 		CloneGroups:  clones,
-	}, nil
+	}
 }
 
 // analysedFile is a source file with its function Units and its lines.
 type analysedFile struct {
 	SourceFile
-	units []analysis.Unit
-	lines [][]byte
+	units     []analysis.Unit
+	fragments []analysis.Fragment
+	lines     [][]byte
 }
 
 // duplicated counts the non-blank lines from start to end that lie in a clone.
@@ -219,11 +263,15 @@ func (f analysedFile) duplicated(cloned map[int]bool, start, end int) int {
 	return n
 }
 
-// clonedLines returns, per file path, the lines lying in any clone.
+// clonedLines returns, per file path, the lines lying in an additional copy:
+// the original of each clone group is not duplication.
 func clonedLines(groups []duplication.CloneGroup) map[string]map[int]bool {
 	cloned := map[string]map[int]bool{}
 	for _, g := range groups {
 		for _, l := range g.Locations {
+			if l.Original {
+				continue
+			}
 			if cloned[l.Path] == nil {
 				cloned[l.Path] = map[int]bool{}
 			}
@@ -237,7 +285,7 @@ func clonedLines(groups []duplication.CloneGroup) map[string]map[int]bool {
 
 // entropyScore weights each Signal and normalises by code size, so that
 // adding code alone does not raise the score.
-func entropyScore(repo Unit, weights map[Signal]float64) float64 {
+func entropyScore(repo Unit, weights map[signal.Signal]float64) float64 {
 	if repo.Lines == 0 {
 		return 0
 	}

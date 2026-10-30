@@ -20,10 +20,9 @@ var Language = analysis.Language{
 		"method_declaration":   true,
 	},
 	UnitName:   unitName,
-	Complexity: complexity,
-	Cyclomatic: cyclomatic,
+	Complexity: complexityRules,
 	VendorDirs: []string{"vendor"},
-	TestPaths:  []string{"*_test.go"},
+	TestFiles:  []string{"*_test.go"},
 	// The convention from "go help generate".
 	Generated: regexp.MustCompile(`(?m)^// Code generated .* DO NOT EDIT\.$`),
 	Abstracted: map[string]bool{
@@ -39,7 +38,7 @@ var Language = analysis.Language{
 		"interpreted_string_literal": true,
 		"raw_string_literal":         true,
 	},
-	Unduplicable: map[string]bool{
+	IgnoredByDuplication: map[string]bool{
 		"import_declaration": true,
 		"comment":            true,
 	},

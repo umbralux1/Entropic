@@ -10,21 +10,25 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/umbralux1/entropic/internal/analysis"
+	"github.com/umbralux1/entropic/internal/duplication"
 	"github.com/umbralux1/entropic/internal/scoring"
+	"github.com/umbralux1/entropic/internal/signal"
 )
 
-// JSON writes r as the versioned JSON report.
+// JSON writes r as the versioned JSON report, Units in severity order.
 func JSON(w io.Writer, r scoring.Report) error {
+	r = r.InSeverityOrder()
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(r)
 }
 
-// Text writes r as a terminal-friendly report: the Baseline, the Entropy
-// Score and Signal summaries, then the Units; test files follow in a
-// section of their own. Threshold violations, if any, come first.
+// Text writes r as a terminal-friendly report holding what the JSON does:
+// the Baseline, Scatter, the Entropy Score and Signal summaries, the Units
+// and clone groups, and the Hotspots; test files follow in a section of
+// their own. Threshold violations, if any, come first.
 func Text(w io.Writer, r scoring.Report) error {
+	r = r.InSeverityOrder()
 	var b strings.Builder
 	violations(&b, r.Violations)
 	if r.Baseline == nil {
@@ -38,12 +42,18 @@ func Text(w io.Writer, r scoring.Report) error {
 			}
 			fmt.Fprintf(&b, "Scatter: %d Modules, %d changed lines (budget %s, %s)\n",
 				s.Modules, s.ChangedLines, number(s.Budget), verdict)
+			fmt.Fprintf(&b, "  informational: %d files, Shannon entropy %s bits, %s effective Modules\n",
+				s.Informational.Files, number(s.Informational.ShannonEntropy), number(s.Informational.EffectiveModules))
+		}
+		if len(r.SkippedAtBaseline) > 0 {
+			fmt.Fprintf(&b, "Skipped at Baseline, not parsable: %s\n", strings.Join(r.SkippedAtBaseline, ", "))
 		}
 		b.WriteString("\n")
 	}
 	if err := group(&b, r.Group); err != nil {
 		return err
 	}
+	hotspots(&b, r.Hotspots, r.ChurnWindowDays)
 	// A group without files still has its repository Unit.
 	if len(r.Tests.Units) > 1 {
 		b.WriteString("\nTests\n\n")
@@ -64,7 +74,7 @@ func violations(b *strings.Builder, vs []scoring.Violation) {
 	for _, v := range vs {
 		fmt.Fprintf(b, "  %s +%s > %s\n", v.Threshold, number(v.Value), number(v.Limit))
 		for _, u := range v.Units {
-			fmt.Fprintf(b, "    %s %s %s\n", u.Kind, u.Name, location(scoring.Unit{Path: u.Path, StartLine: u.StartLine, EndLine: u.EndLine}))
+			fmt.Fprintf(b, "    %s %s %s\n", u.Kind, u.Name, u.Location)
 		}
 	}
 	b.WriteString("\n")
@@ -79,62 +89,53 @@ func group(b *strings.Builder, g scoring.Group) error {
 	}
 	sort.Strings(signals)
 	for _, s := range signals {
-		fmt.Fprintf(b, "%-14s %s\n", title(s), figure(g.Signals[scoring.Signal(s)]))
+		fmt.Fprintf(b, "%-14s %s\n", title(s), figure(g.Signals[signal.Signal(s)]))
 	}
 
 	b.WriteString("\nUnits\n")
 	tw := tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
-	for _, u := range bySeverity(g.Units) {
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t", u.Kind, u.Name, location(u))
-		for _, s := range scoring.Signals {
+	for _, u := range g.Units {
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t", u.Kind, u.Name, u.Location)
+		for _, s := range signal.OfCode {
 			fmt.Fprintf(tw, "%s %s\t", s, unitValue(u, s))
 		}
 		fmt.Fprintf(tw, "%s\n", u.Status)
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	cloneGroups(b, g.CloneGroups)
+	return nil
 }
 
-// bySeverity returns units grouped by kind, finest first, and within a kind
-// ordered by Signal Delta, largest first (by Signal values for a snapshot),
-// comparing Signals in reporting order.
-func bySeverity(units []scoring.Unit) []scoring.Unit {
-	rank := map[analysis.UnitKind]int{}
-	for _, u := range units {
-		if _, ok := rank[u.Kind]; !ok {
-			rank[u.Kind] = len(rank)
-		}
+// cloneGroups writes every location of each clone group, marking the original.
+func cloneGroups(b *strings.Builder, groups []duplication.CloneGroup) {
+	if len(groups) == 0 {
+		return
 	}
-	out := append([]scoring.Unit(nil), units...)
-	sort.SliceStable(out, func(i, j int) bool {
-		a, b := out[i], out[j]
-		if rank[a.Kind] != rank[b.Kind] {
-			return rank[a.Kind] < rank[b.Kind]
+	b.WriteString("\nClone groups\n")
+	for i, g := range groups {
+		fmt.Fprintf(b, "  %d.", i+1)
+		for _, l := range g.Locations {
+			fmt.Fprintf(b, " %s", l.Location)
+			if l.Original {
+				b.WriteString(" (original)")
+			}
 		}
-		if c := compareValues(severity(a), severity(b)); c != 0 {
-			return c > 0
-		}
-		return compareValues(a.Values, b.Values) > 0
-	})
-	return out
+		b.WriteString("\n")
+	}
 }
 
-// compareValues orders Values by each Signal in reporting order: positive
-// when a is larger, negative when b is, zero when equal.
-func compareValues(a, b scoring.Values) int {
-	for _, s := range scoring.Signals {
-		if a[s] != b[s] {
-			return a[s] - b[s]
-		}
+// hotspots writes the Hotspots, highest score first.
+func hotspots(b *strings.Builder, hs []scoring.Hotspot, windowDays int) {
+	if len(hs) == 0 {
+		return
 	}
-	return 0
-}
-
-// severity is a Unit's Delta, or its values for a snapshot.
-func severity(u scoring.Unit) scoring.Values {
-	if u.Delta == nil {
-		return u.Values
+	fmt.Fprintf(b, "\nHotspots (Churn over %d days)\n", windowDays)
+	for _, h := range hs {
+		fmt.Fprintf(b, "  %s %s: weighted total %s, churn %d, score %s\n",
+			h.Kind, h.Location, number(h.WeightedTotal), h.Churn, number(h.Score))
 	}
-	return u.Delta.Values
 }
 
 func figure(f scoring.Figure) string {
@@ -154,20 +155,11 @@ func number(v float64) string {
 	return strings.TrimSuffix(s, ".")
 }
 
-func unitValue(u scoring.Unit, s scoring.Signal) string {
+func unitValue(u scoring.Unit, s signal.Signal) string {
 	if u.Delta == nil {
 		return fmt.Sprint(u.Values[s])
 	}
 	return fmt.Sprintf("%d (%+d)", u.Values[s], u.Delta.Values[s])
-}
-
-// location is where a Unit lives: path and line range for functions and
-// files, the path alone for Modules, and nothing for the repository.
-func location(u scoring.Unit) string {
-	if u.StartLine == 0 {
-		return u.Path
-	}
-	return fmt.Sprintf("%s:%d-%d", u.Path, u.StartLine, u.EndLine)
 }
 
 func title(s string) string {

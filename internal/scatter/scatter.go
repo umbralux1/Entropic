@@ -34,10 +34,12 @@ type Scatter struct {
 type Informational struct {
 	// Files is the number of files the change touches.
 	Files int `json:"files"`
-	// Entropy is the Shannon entropy, in bits, of changed lines across Modules.
-	Entropy float64 `json:"entropy"`
-	// EffectiveModules is 2^Entropy: how many equally changed Modules would
-	// spread the change as evenly. 0 when nothing changed.
+	// ShannonEntropy is the Shannon entropy, in bits, of changed lines
+	// across Modules: how evenly the change is spread. Unrelated to the
+	// Entropy Score.
+	ShannonEntropy float64 `json:"shannonEntropy"`
+	// EffectiveModules is 2^ShannonEntropy: how many equally changed Modules
+	// would spread the change as evenly. 0 when nothing changed.
 	EffectiveModules float64 `json:"effectiveModules"`
 }
 
@@ -58,8 +60,8 @@ func Measure(changes []Change) Scatter {
 	s.Budget = budget(s.ChangedLines)
 	s.OverBudget = float64(s.Modules) > s.Budget
 	if s.ChangedLines > 0 {
-		s.Informational.Entropy = entropy(perModule, s.TouchedModules, s.ChangedLines)
-		s.Informational.EffectiveModules = math.Exp2(s.Informational.Entropy)
+		s.Informational.ShannonEntropy = shannonEntropy(perModule, s.TouchedModules, s.ChangedLines)
+		s.Informational.EffectiveModules = math.Exp2(s.Informational.ShannonEntropy)
 	}
 	return s
 }
@@ -70,8 +72,9 @@ func budget(changedLines int) float64 {
 	return 1 + math.Log2(1+float64(changedLines)/10)
 }
 
-// entropy sums in touched (sorted) Module order so the result is identical run to run.
-func entropy(perModule map[string]int, touched []string, total int) float64 {
+// shannonEntropy sums in touched (sorted) Module order so the result is
+// identical run to run.
+func shannonEntropy(perModule map[string]int, touched []string, total int) float64 {
 	h := 0.0
 	for _, m := range touched {
 		p := float64(perModule[m]) / float64(total)

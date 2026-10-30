@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/umbralux1/entropic/internal/testrepo"
@@ -95,6 +96,30 @@ func TestPythonTestsAreSeparateAndVendoredOrGeneratedCodeIsSkipped(t *testing.T)
 	got = paths(r.Tests.UnitsOfKind("file"))
 	want := []string{"app/core_test.py", "app/test_core.py", "tests/helpers.py"}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Errorf("want test files %v, got %v", want, got)
+	}
+}
+
+func TestPythonConftestAndTestDirectoriesAreTestCode(t *testing.T) {
+	repo := testrepo.New(t).
+		Write("app/core.py", "def run():\n    pass\n").
+		Write("app/conftest.py", "def fixture():\n    pass\n").
+		Write("test/helpers.py", "def helper():\n    pass\n").
+		// Only a directory named exactly test or tests holds tests.
+		Write("test_data/loader.py", "def load():\n    pass\n").
+		Write("contests/judge.py", "def judge():\n    pass\n").
+		Commit("add code")
+
+	r := repo.Run("--base", "none").Report(0)
+
+	got := paths(r.UnitsOfKind("file"))
+	want := []string{"app/core.py", "contests/judge.py", "test_data/loader.py"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("want production files %v, got %v", want, got)
+	}
+	got = paths(r.Tests.UnitsOfKind("file"))
+	want = []string{"app/conftest.py", "test/helpers.py"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("want test files %v, got %v", want, got)
 	}
 }

@@ -63,9 +63,9 @@ func TestScatterReportsFilesTouchedAndShannonEntropyAsInformational(t *testing.T
 		t.Fatalf("want Scatter, got none")
 	}
 	info := s.Informational
-	if info.Files != 3 || math.Abs(info.Entropy-0.8112781244591328) > 1e-9 ||
+	if info.Files != 3 || math.Abs(info.ShannonEntropy-0.8112781244591328) > 1e-9 ||
 		math.Abs(info.EffectiveModules-1.7547653506033232) > 1e-9 {
-		t.Errorf("informational: want 3 files, entropy 0.8113, 2^H 1.7548; got %+v", info)
+		t.Errorf("informational: want 3 files, Shannon entropy 0.8113, 2^H 1.7548; got %+v", info)
 	}
 }
 
@@ -153,6 +153,22 @@ func TestScatterLeavesOutExcludedVendoredAndGeneratedFiles(t *testing.T) {
 
 	if s := r.Scatter; s == nil || s.Modules != 1 || s.ChangedLines != 3 || s.Informational.Files != 1 {
 		t.Errorf("Scatter: want only calc (1 Module, 3 lines, 1 file); got %+v", s)
+	}
+}
+
+func TestScatterLeavesOutTestFiles(t *testing.T) {
+	repo := testrepo.New(t).
+		Write("app/core.py", "def run():\n    return 1\n").
+		Write("tests/test_core.py", "def test_run():\n    pass\n").
+		Commit("start").
+		Write("app/core.py", "def run():\n    return 2\n"). // 1 deleted, 1 added
+		Write("tests/test_core.py", "def test_run():\n    assert True\n\n\ndef test_more():\n    pass\n")
+
+	// Counting the test, 2 Modules would exceed a budget of 1 + log2(1.2) = 1.26.
+	r := repo.Run("--format", "json").Report(0)
+
+	if s := r.Scatter; s == nil || s.Modules != 1 || s.ChangedLines != 2 || s.Informational.Files != 1 {
+		t.Errorf("Scatter: want only app (1 Module, 2 lines, 1 file); got %+v", s)
 	}
 }
 

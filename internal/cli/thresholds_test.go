@@ -3,7 +3,6 @@ package cli_test
 import (
 	"bytes"
 	"math"
-	"sort"
 	"strings"
 	"testing"
 
@@ -63,7 +62,7 @@ func TestDuplicationOverThresholdNamesTheFilesThatGainedClonedLines(t *testing.T
 		Write("calc/calc.go", calcGo).
 		Write("entropic.toml", "[thresholds]\nduplication = 5\nentropy_score = 100\n").
 		Commit("add calc").
-		Write("stats/stats.go", countAbove) // clones SumPositive: 9 lines in each file
+		Write("stats/stats.go", countAbove) // copies SumPositive: 9 lines
 
 	r := repo.Run().Report(1)
 
@@ -71,16 +70,9 @@ func TestDuplicationOverThresholdNamesTheFilesThatGainedClonedLines(t *testing.T
 	if v.Limit != 5 || v.Value != 9 {
 		t.Errorf("duplication violation: want +9 over a limit of 5; got %+v", v)
 	}
-	var files []string
-	for _, u := range v.Units {
-		if u.Kind != "file" {
-			t.Errorf("duplication violation: want file Units, got %+v", u)
-		}
-		files = append(files, u.Path)
-	}
-	sort.Strings(files) // both gained 9: no order between them
-	if strings.Join(files, ",") != "calc/calc.go,stats/stats.go" {
-		t.Errorf("duplication violation: want calc/calc.go and stats/stats.go responsible; got %v", files)
+	// calc/calc.go holds the original, which adds no Duplication.
+	if len(v.Units) != 1 || v.Units[0].Kind != "file" || v.Units[0].Path != "stats/stats.go" {
+		t.Errorf("duplication violation: want only file stats/stats.go responsible; got %+v", v.Units)
 	}
 }
 
@@ -180,6 +172,21 @@ func TestEntropyScoreRiseOverThresholdNamesFunctionsThatGainedComplexity(t *test
 	}
 }
 
+func TestSettingOneThresholdKeepsTheOthersDefaults(t *testing.T) {
+	repo := testrepo.New(t).
+		Write("calc/calc.go", calcGo).
+		Write("entropic.toml", "[thresholds]\ncomplexity = 100\n").
+		Commit("add calc").
+		Write("calc/calc.go", signDeep)
+
+	r := repo.Run().Report(1)
+
+	// The Entropy Score rises by 31.52 (as above), over its default limit of 10.
+	if v := r.Violation(t, "entropyScore"); v.Limit != 10 {
+		t.Errorf("entropyScore violation: want the default limit 10, got %+v", v)
+	}
+}
+
 func TestSnapshotExceedsNoThresholdEvenWhenStrict(t *testing.T) {
 	repo := testrepo.New(t).
 		Write("calc/calc.go", signDeep).
@@ -213,5 +220,27 @@ func TestSourceThatFailsToParseExits2NamingTheFile(t *testing.T) {
 
 	if res.Code != 2 || res.Stdout != "" || !strings.Contains(res.Stderr, "calc/broken.go") {
 		t.Errorf("want exit 2 and an error naming calc/broken.go; got %d, stdout %q, stderr %q", res.Code, res.Stdout, res.Stderr)
+	}
+}
+
+func TestSourceThatFailedToParseAtTheBaselineIsSkippedWithAWarning(t *testing.T) {
+	repo := testrepo.New(t).
+		Write("calc/calc.go", calcGo).
+		Write("broken.py", "def broken(:\n    pass\n").
+		Commit("add calc and a broken script").
+		Remove("broken.py")
+
+	res := repo.Run("--base", "HEAD")
+	r := res.Report(0)
+
+	if !strings.Contains(res.Stderr, "broken.py") {
+		t.Errorf("want a warning naming broken.py on stderr, got %q", res.Stderr)
+	}
+	if strings.Join(r.SkippedAtBaseline, ",") != "broken.py" {
+		t.Errorf("skippedAtBaseline: want [broken.py], got %v", r.SkippedAtBaseline)
+	}
+	// calc.go parsed at both revisions and did not change.
+	if u := r.Unit(t, "file", "calc/calc.go"); u.Status != "unchanged" {
+		t.Errorf("calc/calc.go: want unchanged, got %+v", u)
 	}
 }

@@ -22,13 +22,14 @@ var Language = analysis.Language{
 		"class_definition": true,
 	},
 	UnitName:   unitName,
-	Complexity: complexity,
-	Cyclomatic: cyclomatic,
+	Complexity: complexityRules,
 	// vendor by general convention, _vendor as pip and setuptools do,
 	// site-packages for a checked-in environment.
 	VendorDirs: []string{"vendor", "_vendor", "site-packages"},
-	// pytest's default discovery patterns, plus a tests directory.
-	TestPaths: []string{"test_*.py", "*_test.py", "tests"},
+	// pytest's default discovery patterns and its conftest.py, plus test
+	// and tests directories.
+	TestFiles: []string{"test_*.py", "*_test.py", "conftest.py"},
+	TestDirs:  []string{"test", "tests"},
 	// protoc's marker, the Go convention some Python generators reuse, and
 	// the cross-language @generated tag, each as a leading comment line.
 	Generated: regexp.MustCompile(
@@ -40,7 +41,7 @@ var Language = analysis.Language{
 		"string":              true,
 		"concatenated_string": true,
 	},
-	Unduplicable: map[string]bool{
+	IgnoredByDuplication: map[string]bool{
 		"import_statement":        true,
 		"import_from_statement":   true,
 		"future_import_statement": true,

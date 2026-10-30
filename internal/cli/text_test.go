@@ -71,6 +71,60 @@ func Grid(rows [][]int) {
 	}
 }
 
+// flat is a 12-line function without control flow: Complexity 0.
+var flat = "\nfunc Flat() {\n" + strings.Repeat("\tx := 1\n", 10) + "}\n"
+
+func TestUnitsAreOrderedByWeightedDeltaInJSONAndText(t *testing.T) {
+	repo := testrepo.New(t).Write("z/z.go", "package z\n"+flat).Commit("add z").
+		// A copy of Flat: Duplication +12, weighing 12 x 0.1 = 1.2.
+		Write("c/c.go", "package c\n"+flat+"\nconst C = 1\n").
+		// Grid: Complexity +1, weighing 1.
+		Write("a/grid.go", "package a\n\nfunc Grid(rows [][]int) {\n\tfor range rows {\n\t}\n}\n")
+
+	r := repo.Run("--base", "HEAD").Report(0)
+
+	var got []string
+	for _, u := range r.UnitsOfKind("function") {
+		got = append(got, u.Path+":"+u.Name)
+	}
+	want := []string{"c/c.go:Flat", "a/grid.go:Grid", "z/z.go:Flat"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("JSON functions: want %v by weighted Delta, got %v", want, got)
+	}
+
+	out := repo.Run("--base", "HEAD", "--format", "text").Text(0)
+	last := -1
+	for _, loc := range []string{"c/c.go:3-14", "a/grid.go:3-6", "z/z.go:3-14"} {
+		i := strings.Index(out, loc)
+		if i < last {
+			t.Errorf("text: want functions in the order of the JSON, %v:\n%s", want, out)
+		}
+		last = i
+	}
+}
+
+func TestTextShowsCloneGroupsHotspotsAndScatterDetail(t *testing.T) {
+	repo := testrepo.New(t).
+		Write("calc/calc.go", calcGo).
+		CommitDaysAgo(10, "add calc").
+		Write("stats/stats.go", countAbove)
+
+	out := repo.Run("--format", "text").Text(0)
+
+	// The clone of SumPositive, its original marked; calc/calc.go as a Hotspot
+	// (Complexity 4, churn 1, score 4); one file in one Module changed, so a
+	// Shannon entropy of 0 and 1 effective Module.
+	for _, want := range []string{
+		"Clone groups", "calc/calc.go:10-18 (original)", "stats/stats.go:3-11",
+		"Hotspots", "calc/calc.go", "churn 1", "score 4",
+		"1 files", "Shannon entropy 0", "1 effective Modules",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("text report lacks %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestTextShowsScatterAgainstItsBudget(t *testing.T) {
 	repo := testrepo.New(t)
 	for _, m := range []string{"a", "b", "c", "d"} {

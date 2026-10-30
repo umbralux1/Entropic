@@ -24,8 +24,12 @@ func TestFrequentlyChangedComplexFileRanksAboveUnchangedComplexFile(t *testing.T
 	// hot.go: Complexity 4 (as calcGo) plus Duplication 15 weighed 0.1: Sign
 	// (6 lines) and SumPositive (9) are clones of cold.go's. Changed in 2
 	// commits inside the window.
-	if h := r.Hotspots[0]; h.Churn != 2 || h.Entropy != 5.5 || h.Score != 11 {
-		t.Errorf("calc/hot.go: want churn 2, entropy 5.5, score 11; got %+v", h)
+	if h := r.Hotspots[0]; h.Churn != 2 || h.WeightedTotal != 5.5 || h.Score != 11 {
+		t.Errorf("calc/hot.go: want churn 2, weighted total 5.5, score 11; got %+v", h)
+	}
+	// hot.go has 20 lines: calcGo's 18, a blank and the constant.
+	if h := r.Hotspots[0]; h.Kind != "file" || h.Name != "calc/hot.go" || h.StartLine != 1 || h.EndLine != 20 {
+		t.Errorf("calc/hot.go: want the Hotspot to reference file Unit calc/hot.go, lines 1-20; got %+v", h)
 	}
 }
 

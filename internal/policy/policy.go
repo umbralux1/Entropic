@@ -6,45 +6,42 @@ import (
 	"sort"
 
 	"github.com/umbralux1/entropic/internal/analysis"
-	"github.com/umbralux1/entropic/internal/config"
 	"github.com/umbralux1/entropic/internal/scatter"
 	"github.com/umbralux1/entropic/internal/scoring"
+	"github.com/umbralux1/entropic/internal/signal"
 )
 
 // unitSignal is a Signal measured on Units, judged on the kind of Unit that
 // best owns it.
 type unitSignal struct {
-	signal    scoring.Signal
+	signal    signal.Signal
 	kind      analysis.UnitKind
-	threshold scoring.Threshold
-	limit     func(config.Thresholds) float64
+	threshold signal.Threshold
 }
 
 // unitSignals judges Complexity on functions, and Duplication on files,
 // which also count cloned lines outside functions.
 var unitSignals = []unitSignal{
-	{scoring.Complexity, analysis.Function, scoring.ComplexityThreshold,
-		func(t config.Thresholds) float64 { return t.Complexity }},
-	{scoring.Duplication, analysis.File, scoring.DuplicationThreshold,
-		func(t config.Thresholds) float64 { return t.Duplication }},
+	{signal.Complexity, analysis.Function, signal.ComplexityThreshold},
+	{signal.Duplication, analysis.File, signal.DuplicationThreshold},
 }
 
-// Evaluate returns the thresholds r's production code exceeds. A snapshot
-// has no Delta, so it exceeds none.
-func Evaluate(r scoring.Report, t config.Thresholds) []scoring.Violation {
+// Evaluate returns the thresholds r's production code exceeds, given the
+// limit of each. A snapshot has no Delta, so it exceeds none.
+func Evaluate(r scoring.Report, limit func(signal.Threshold) float64) []scoring.Violation {
 	violations := []scoring.Violation{}
 	if r.Baseline == nil {
 		return violations
 	}
 	for _, s := range unitSignals {
-		if v, ok := s.evaluate(r.Units, s.limit(t)); ok {
+		if v, ok := s.evaluate(r.Units, limit(s.threshold)); ok {
 			violations = append(violations, v)
 		}
 	}
-	if v, ok := scatterOverBudget(r.Scatter, t.Scatter); ok {
+	if v, ok := scatterOverBudget(r.Scatter, limit(signal.ScatterThreshold)); ok {
 		violations = append(violations, v)
 	}
-	if v, ok := entropyScore(r.Group, t.EntropyScore); ok {
+	if v, ok := entropyScore(r.Group, limit(signal.EntropyScoreThreshold)); ok {
 		violations = append(violations, v)
 	}
 	return violations
@@ -57,7 +54,7 @@ func (s unitSignal) evaluate(units []scoring.Unit, limit float64) (scoring.Viola
 		return scoring.Violation{}, false
 	}
 	return scoring.Violation{
-		Threshold: s.threshold,
+		Threshold: s.threshold.Name,
 		Limit:     limit,
 		Value:     float64(over[0].Delta.Values[s.signal]),
 		Units:     refs(over),
@@ -91,9 +88,9 @@ func scatterOverBudget(s *scatter.Scatter, limit float64) (scoring.Violation, bo
 	}
 	units := make([]scoring.UnitRef, len(s.TouchedModules))
 	for i, m := range s.TouchedModules {
-		units[i] = scoring.UnitRef{Kind: analysis.Module, Name: m, Path: m}
+		units[i] = scoring.UnitRef{Kind: analysis.Module, Name: m, Location: analysis.Location{Path: m}}
 	}
-	return scoring.Violation{Threshold: scoring.ScatterThreshold, Limit: limit, Value: excess, Units: units}, true
+	return scoring.Violation{Threshold: signal.ScatterThreshold.Name, Limit: limit, Value: excess, Units: units}, true
 }
 
 // entropyScore is violated when the Entropy Score rises by more than limit.
@@ -116,7 +113,7 @@ func entropyScore(g scoring.Group, limit float64) (scoring.Violation, bool) {
 		}
 	}
 	return scoring.Violation{
-		Threshold: scoring.EntropyScoreThreshold,
+		Threshold: signal.EntropyScoreThreshold.Name,
 		Limit:     limit,
 		Value:     rise,
 		Units:     refs(responsible),
@@ -127,7 +124,7 @@ func entropyScore(g scoring.Group, limit float64) (scoring.Violation, bool) {
 func refs(units []scoring.Unit) []scoring.UnitRef {
 	out := make([]scoring.UnitRef, len(units))
 	for i, u := range units {
-		out[i] = scoring.UnitRef{Kind: u.Kind, Name: u.Name, Path: u.Path, StartLine: u.StartLine, EndLine: u.EndLine}
+		out[i] = u.Ref()
 	}
 	return out
 }

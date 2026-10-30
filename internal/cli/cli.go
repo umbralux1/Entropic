@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"path"
 	"time"
 
 	"github.com/umbralux1/entropic/internal/config"
@@ -52,15 +53,15 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
 		return ExitError
 	}
-	r, err := measure(dir, *base, cfg)
+	r, err := measure(dir, *base, cfg, stderr)
 	if err == nil {
-		r, err = withHotspots(dir, r, cfg.ChurnWindowDays, signalWeights(cfg))
+		r, err = withHotspots(dir, r, cfg.ChurnWindowDays)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
 		return ExitError
 	}
-	r.Violations = policy.Evaluate(r, cfg.Thresholds)
+	r.Violations = policy.Evaluate(r, cfg.Limit)
 	if err := render(stdout, r); err != nil {
 		fmt.Fprintf(stderr, "entropic: %v\n", err)
 		return ExitError
@@ -72,23 +73,23 @@ func Run(args []string, dir string, stdout, stderr io.Writer) int {
 }
 
 // withHotspots counts Churn over the last windowDays and ranks r's Hotspots.
-func withHotspots(dir string, r scoring.Report, windowDays int, weights map[scoring.Signal]float64) (scoring.Report, error) {
+func withHotspots(dir string, r scoring.Report, windowDays int) (scoring.Report, error) {
 	churn, err := revisions.Churn(dir, time.Now().AddDate(0, 0, -windowDays))
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	return r.WithHotspots(churn, windowDays, weights), nil
+	return r.WithHotspots(churn, windowDays), nil
 }
 
 // measure measures the working tree and, unless base is none, compares it
 // against the Baseline. Both are measured with the current config, so the
 // Delta reflects the code alone.
-func measure(dir, base string, cfg config.Config) (scoring.Report, error) {
-	weights := signalWeights(cfg)
-	inScope := func(path string) bool {
-		lang, ok := language.ForPath(path)
-		return ok && !lang.Vendored(path) && !cfg.Excluded(path)
+func measure(dir, base string, cfg config.Config, stderr io.Writer) (scoring.Report, error) {
+	inScope := func(p string) bool {
+		lang, ok := language.ForPath(p)
+		return ok && !lang.IsVendored(p) && !cfg.Excluded(p)
 	}
+	opts := scoring.Options{Weights: cfg.Weights, DuplicateMinLines: cfg.DuplicateMinLines}
 	baseline, err := revisions.Resolve(dir, base)
 	if err != nil {
 		return scoring.Report{}, err
@@ -97,21 +98,25 @@ func measure(dir, base string, cfg config.Config) (scoring.Report, error) {
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	current, err := scoring.Measure(sourceFiles(nowFiles), weights, cfg.DuplicateMinLines)
-	if err != nil || baseline == nil {
-		return current, err
+	if baseline == nil {
+		return scoring.Measure(sourceFiles(nowFiles), opts)
 	}
 
 	baseFiles, err := revisions.AtCommit(dir, baseline.Commit, inScope)
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	before, err := scoring.Measure(sourceFiles(baseFiles), weights, cfg.DuplicateMinLines)
+	before, err := measureBaseline(dir, *baseline, baseFiles, opts, inScope, stderr)
 	if err != nil {
-		return scoring.Report{}, fmt.Errorf("at Baseline %s: %w", baseline.Ref, err)
+		return scoring.Report{}, err
+	}
+	opts.Baseline = &before
+	current, err := scoring.Measure(sourceFiles(nowFiles), opts)
+	if err != nil {
+		return scoring.Report{}, err
 	}
 	r := scoring.Compare(current, before)
-	r.Baseline = &scoring.Baseline{Ref: baseline.Ref, Commit: baseline.Commit}
+	r.Baseline = baseline
 
 	changed, err := revisions.ChangedLines(dir, baseline.Commit, inScope)
 	if err != nil {
@@ -122,8 +127,30 @@ func measure(dir, base string, cfg config.Config) (scoring.Report, error) {
 	return r, nil
 }
 
+// measureBaseline measures files, the Baseline's, under the names the
+// working tree gives them: Units are matched by path, so a pure rename then
+// has no Delta. Code that does not parse there is history the change cannot
+// fix, so it is skipped with a warning rather than failing the run.
+func measureBaseline(dir string, baseline revisions.Baseline, files []revisions.File,
+	opts scoring.Options, inScope func(string) bool, stderr io.Writer) (scoring.Report, error) {
+	renames, err := revisions.Renames(dir, baseline.Commit)
+	if err != nil {
+		return scoring.Report{}, err
+	}
+	opts.SkipUnparsable = true
+	before, err := scoring.Measure(sourceFiles(underCurrentNames(files, renames, inScope)), opts)
+	if err != nil {
+		return scoring.Report{}, fmt.Errorf("at Baseline %s: %w", baseline.Ref, err)
+	}
+	for _, p := range before.Unparsable() {
+		fmt.Fprintf(stderr, "entropic: warning: skipped %s at Baseline %s: it does not parse\n", p, baseline.Ref)
+	}
+	return before, nil
+}
+
 // changes turns changed lines per file into Scatter's input, leaving out
-// files that are generated now or were at the Baseline.
+// test files, like every production Signal, and files that are generated
+// now or were at the Baseline.
 func changes(changed map[string]int, current, baseline []revisions.File) []scatter.Change {
 	generated := map[string]bool{}
 	for _, f := range append(append([]revisions.File(nil), current...), baseline...) {
@@ -134,7 +161,7 @@ func changes(changed map[string]int, current, baseline []revisions.File) []scatt
 	}
 	out := make([]scatter.Change, 0, len(changed))
 	for path, lines := range changed {
-		if generated[path] {
+		if lang, _ := language.ForPath(path); generated[path] || lang.IsTest(path) {
 			continue
 		}
 		out = append(out, scatter.Change{Path: path, Module: scoring.ModuleOf(path), Lines: lines})
@@ -142,13 +169,22 @@ func changes(changed map[string]int, current, baseline []revisions.File) []scatt
 	return out
 }
 
-// signalWeights is cfg's Signal weights keyed by Signal.
-func signalWeights(cfg config.Config) map[scoring.Signal]float64 {
-	weights := map[scoring.Signal]float64{}
-	for name, w := range cfg.Weights {
-		weights[scoring.Signal(name)] = w
+// underCurrentNames returns files with each renamed one under its new path,
+// when the new path is measured and holds the same kind of code: same
+// language, and test or production as before.
+func underCurrentNames(files []revisions.File, renames map[string]string, inScope func(string) bool) []revisions.File {
+	out := make([]revisions.File, len(files))
+	for i, f := range files {
+		out[i] = f
+		to, ok := renames[f.Path]
+		if !ok || !inScope(to) || path.Ext(to) != path.Ext(f.Path) {
+			continue
+		}
+		if lang, _ := language.ForPath(f.Path); lang.IsTest(to) == lang.IsTest(f.Path) {
+			out[i].Path = to
+		}
 	}
-	return weights
+	return out
 }
 
 // sourceFiles pairs each file with its language, leaving out generated code.

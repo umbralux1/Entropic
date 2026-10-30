@@ -4,28 +4,18 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+
+	"github.com/umbralux1/entropic/internal/signal"
 )
-
-// Signal names one measurable kind of entropy.
-type Signal string
-
-// Signals measured on Units.
-const (
-	Complexity  Signal = "complexity"
-	Duplication Signal = "duplication"
-)
-
-// Signals lists every Signal measured on Units, in reporting order.
-var Signals = []Signal{Complexity, Duplication}
 
 // Values holds one value per Signal. A missing Signal reads as zero.
-type Values map[Signal]int
+type Values map[signal.Signal]int
 
 // Weighted is the Values' contribution to the Entropy Score, before
 // normalising by size, with each Signal weighed by weights.
-func (v Values) Weighted(weights map[Signal]float64) float64 {
+func (v Values) Weighted(weights map[signal.Signal]float64) float64 {
 	total := 0.0
-	for _, s := range Signals {
+	for _, s := range signal.OfCode {
 		total += weights[s] * float64(v[s])
 	}
 	return total
@@ -33,7 +23,7 @@ func (v Values) Weighted(weights map[Signal]float64) float64 {
 
 func (v Values) add(other Values) Values {
 	out := Values{}
-	for _, s := range Signals {
+	for _, s := range signal.OfCode {
 		out[s] = v[s] + other[s]
 	}
 	return out
@@ -41,14 +31,14 @@ func (v Values) add(other Values) Values {
 
 func (v Values) minus(other Values) Values {
 	out := Values{}
-	for _, s := range Signals {
+	for _, s := range signal.OfCode {
 		out[s] = v[s] - other[s]
 	}
 	return out
 }
 
 func (v Values) isZero() bool {
-	for _, s := range Signals {
+	for _, s := range signal.OfCode {
 		if v[s] != 0 {
 			return false
 		}
@@ -66,7 +56,7 @@ func marshalWith(obj any, v Values) ([]byte, error) {
 	}
 	var b bytes.Buffer
 	b.Write(bytes.TrimSuffix(fields, []byte("}")))
-	for _, s := range Signals {
+	for _, s := range signal.OfCode {
 		fmt.Fprintf(&b, ",%q:%d", s, v[s])
 	}
 	b.WriteByte('}')

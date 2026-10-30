@@ -176,14 +176,15 @@ func TestSnapshotReportsGoFunctionComplexityAsJSON(t *testing.T) {
 
 	r := repo.Run("--base", "none", "--format", "json").Report(0)
 
-	if r.SchemaVersion != 1 {
-		t.Errorf("schemaVersion: want 1, got %d", r.SchemaVersion)
+	if r.SchemaVersion != 2 {
+		t.Errorf("schemaVersion: want 2, got %d", r.SchemaVersion)
 	}
+	// Units are in severity order: in a snapshot, the larger weighted value first.
 	want := []testrepo.ReportUnit{
-		{Kind: "function", Name: "Sign", Path: "calc/calc.go", Module: "calc", StartLine: 3, EndLine: 8, Lines: 6, Complexity: 1,
-			Informational: testrepo.ReportInformational{Cyclomatic: 2}}, // 1 + if
 		{Kind: "function", Name: "SumPositive", Path: "calc/calc.go", Module: "calc", StartLine: 10, EndLine: 18, Lines: 9, Complexity: 3,
 			Informational: testrepo.ReportInformational{Cyclomatic: 3}}, // 1 + for + if
+		{Kind: "function", Name: "Sign", Path: "calc/calc.go", Module: "calc", StartLine: 3, EndLine: 8, Lines: 6, Complexity: 1,
+			Informational: testrepo.ReportInformational{Cyclomatic: 2}}, // 1 + if
 	}
 	fns := r.UnitsOfKind("function")
 	if len(fns) != len(want) {
