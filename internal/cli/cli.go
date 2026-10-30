@@ -85,11 +85,11 @@ func withHotspots(dir string, r scoring.Report, windowDays int, weights map[scor
 // against the Baseline. Both are measured with the current config, so the
 // Delta reflects the code alone.
 func measure(dir, base string, cfg config.Config, stderr io.Writer) (scoring.Report, error) {
-	weights := signalWeights(cfg)
-	inScope := func(path string) bool {
-		lang, ok := language.ForPath(path)
-		return ok && !lang.Vendored(path) && !cfg.Excluded(path)
+	inScope := func(p string) bool {
+		lang, ok := language.ForPath(p)
+		return ok && !lang.Vendored(p) && !cfg.Excluded(p)
 	}
+	opts := scoring.Options{Weights: signalWeights(cfg), DuplicateMinLines: cfg.DuplicateMinLines}
 	baseline, err := revisions.Resolve(dir, base)
 	if err != nil {
 		return scoring.Report{}, err
@@ -98,32 +98,22 @@ func measure(dir, base string, cfg config.Config, stderr io.Writer) (scoring.Rep
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	opts := scoring.Options{Weights: weights, DuplicateMinLines: cfg.DuplicateMinLines}
-	current, err := scoring.Measure(sourceFiles(nowFiles), opts)
-	if err != nil || baseline == nil {
-		return current, err
+	if baseline == nil {
+		return scoring.Measure(sourceFiles(nowFiles), opts)
 	}
 
 	baseFiles, err := revisions.AtCommit(dir, baseline.Commit, inScope)
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	renames, err := revisions.Renames(dir, baseline.Commit)
+	before, err := measureBaseline(dir, *baseline, baseFiles, opts, inScope, stderr)
 	if err != nil {
 		return scoring.Report{}, err
 	}
-	// Units are matched by path, so the Baseline is measured under today's
-	// names: a pure rename then has no Delta.
-	measuredBase := underCurrentNames(baseFiles, renames, inScope)
-	// Code that no longer parses is an error now, but at the Baseline it is
-	// history the change cannot fix, so it is skipped.
-	opts.SkipUnparsable = true
-	before, err := scoring.Measure(sourceFiles(measuredBase), opts)
+	opts.Baseline = &before
+	current, err := scoring.Measure(sourceFiles(nowFiles), opts)
 	if err != nil {
-		return scoring.Report{}, fmt.Errorf("at Baseline %s: %w", baseline.Ref, err)
-	}
-	for _, path := range before.Unparsable() {
-		fmt.Fprintf(stderr, "entropic: warning: skipped %s at Baseline %s: it does not parse\n", path, baseline.Ref)
+		return scoring.Report{}, err
 	}
 	r := scoring.Compare(current, before)
 	r.Baseline = &scoring.Baseline{Ref: baseline.Ref, Commit: baseline.Commit}
@@ -135,6 +125,27 @@ func measure(dir, base string, cfg config.Config, stderr io.Writer) (scoring.Rep
 	s := scatter.Measure(changes(changed, nowFiles, baseFiles))
 	r.Scatter = &s
 	return r, nil
+}
+
+// measureBaseline measures files, the Baseline's, under the names the
+// working tree gives them: Units are matched by path, so a pure rename then
+// has no Delta. Code that does not parse there is history the change cannot
+// fix, so it is skipped with a warning rather than failing the run.
+func measureBaseline(dir string, baseline revisions.Baseline, files []revisions.File,
+	opts scoring.Options, inScope func(string) bool, stderr io.Writer) (scoring.Report, error) {
+	renames, err := revisions.Renames(dir, baseline.Commit)
+	if err != nil {
+		return scoring.Report{}, err
+	}
+	opts.SkipUnparsable = true
+	before, err := scoring.Measure(sourceFiles(underCurrentNames(files, renames, inScope)), opts)
+	if err != nil {
+		return scoring.Report{}, fmt.Errorf("at Baseline %s: %w", baseline.Ref, err)
+	}
+	for _, p := range before.Unparsable() {
+		fmt.Fprintf(stderr, "entropic: warning: skipped %s at Baseline %s: it does not parse\n", p, baseline.Ref)
+	}
+	return before, nil
 }
 
 // changes turns changed lines per file into Scatter's input, leaving out

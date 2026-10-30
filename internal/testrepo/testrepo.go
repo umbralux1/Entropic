@@ -154,11 +154,13 @@ type ReportCloneGroup struct {
 	Locations []ReportLocation `json:"locations"`
 }
 
-// ReportLocation is a line range in a file.
+// ReportLocation is a line range in a file, and whether it is its clone
+// group's original.
 type ReportLocation struct {
 	Path      string `json:"path"`
 	StartLine int    `json:"startLine"`
 	EndLine   int    `json:"endLine"`
+	Original  bool   `json:"original"`
 }
 
 // ReportHotspot is a file Unit ranked by entropy times Churn.

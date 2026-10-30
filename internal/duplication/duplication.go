@@ -15,15 +15,29 @@ type Location struct {
 	EndLine   int    `json:"endLine"`
 }
 
-// CloneGroup is every Location of one duplicated fragment.
+// CloneGroup is every location of one duplicated fragment. One of them is
+// the original; Duplication counts only the others, the additional copies.
 type CloneGroup struct {
-	Locations []Location `json:"locations"`
+	Locations []CloneLocation `json:"locations"`
 }
+
+// CloneLocation is one location of a clone group.
+type CloneLocation struct {
+	Location
+	// Original marks the location the others are copies of.
+	Original bool `json:"original"`
+}
+
+// Existed reports whether a fragment of the given shape was already in the
+// file at path before the change being measured.
+type Existed func(path string, shape uint64) bool
 
 // Find groups fragments, keyed by file path, into clone groups. Only the
 // largest clones are reported: a group whose every Location lies inside a
-// larger reported clone is not.
-func Find(fragments map[string][]analysis.Fragment) []CloneGroup {
+// larger reported clone is not. The original of each group is its first
+// location, by path and line, that existed; the first location if none did
+// or existed is nil.
+func Find(fragments map[string][]analysis.Fragment, existed Existed) []CloneGroup {
 	byShape := map[uint64][]Location{}
 	for path, fs := range fragments {
 		for _, f := range fs {
@@ -31,10 +45,12 @@ func Find(fragments map[string][]analysis.Fragment) []CloneGroup {
 		}
 	}
 	var candidates [][]Location
-	for _, locs := range byShape {
+	shapeOf := map[*Location]uint64{}
+	for shape, locs := range byShape {
 		if len(locs) > 1 {
 			sortLocations(locs)
 			candidates = append(candidates, locs)
+			shapeOf[&locs[0]] = shape
 		}
 	}
 	sort.Slice(candidates, func(i, j int) bool {
@@ -51,11 +67,31 @@ func Find(fragments map[string][]analysis.Fragment) []CloneGroup {
 		if allInside(locs, reported) {
 			continue
 		}
-		groups = append(groups, CloneGroup{Locations: locs})
+		groups = append(groups, group(locs, shapeOf[&locs[0]], existed))
 		reported = append(reported, locs...)
 	}
-	sort.Slice(groups, func(i, j int) bool { return less(groups[i].Locations[0], groups[j].Locations[0]) })
+	sort.Slice(groups, func(i, j int) bool {
+		return less(groups[i].Locations[0].Location, groups[j].Locations[0].Location)
+	})
 	return groups
+}
+
+// group makes a clone group of sorted locs of one shape, marking its original.
+func group(locs []Location, shape uint64, existed Existed) CloneGroup {
+	original := 0
+	if existed != nil {
+		for i, l := range locs {
+			if existed(l.Path, shape) {
+				original = i
+				break
+			}
+		}
+	}
+	g := CloneGroup{Locations: make([]CloneLocation, len(locs))}
+	for i, l := range locs {
+		g.Locations[i] = CloneLocation{Location: l, Original: i == original}
+	}
+	return g
 }
 
 func span(l Location) int { return l.EndLine - l.StartLine + 1 }

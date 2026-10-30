@@ -3,7 +3,6 @@ package cli_test
 import (
 	"bytes"
 	"math"
-	"sort"
 	"strings"
 	"testing"
 
@@ -63,7 +62,7 @@ func TestDuplicationOverThresholdNamesTheFilesThatGainedClonedLines(t *testing.T
 		Write("calc/calc.go", calcGo).
 		Write("entropic.toml", "[thresholds]\nduplication = 5\nentropy_score = 100\n").
 		Commit("add calc").
-		Write("stats/stats.go", countAbove) // clones SumPositive: 9 lines in each file
+		Write("stats/stats.go", countAbove) // copies SumPositive: 9 lines
 
 	r := repo.Run().Report(1)
 
@@ -71,16 +70,9 @@ func TestDuplicationOverThresholdNamesTheFilesThatGainedClonedLines(t *testing.T
 	if v.Limit != 5 || v.Value != 9 {
 		t.Errorf("duplication violation: want +9 over a limit of 5; got %+v", v)
 	}
-	var files []string
-	for _, u := range v.Units {
-		if u.Kind != "file" {
-			t.Errorf("duplication violation: want file Units, got %+v", u)
-		}
-		files = append(files, u.Path)
-	}
-	sort.Strings(files) // both gained 9: no order between them
-	if strings.Join(files, ",") != "calc/calc.go,stats/stats.go" {
-		t.Errorf("duplication violation: want calc/calc.go and stats/stats.go responsible; got %v", files)
+	// calc/calc.go holds the original, which adds no Duplication.
+	if len(v.Units) != 1 || v.Units[0].Kind != "file" || v.Units[0].Path != "stats/stats.go" {
+		t.Errorf("duplication violation: want only file stats/stats.go responsible; got %+v", v.Units)
 	}
 }
 

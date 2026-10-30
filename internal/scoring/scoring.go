@@ -46,6 +46,8 @@ type Report struct {
 
 	// unparsable are the files skipped because they failed to parse.
 	unparsable []string
+	// shapes are the fragment shapes Duplication compared, per file path.
+	shapes map[string]map[uint64]bool
 }
 
 // Group is the measurement of one group of files, rolled up to its own
@@ -112,11 +114,14 @@ type Options struct {
 	// SkipUnparsable leaves out files that fail to parse, as Compare then
 	// reports, instead of failing the measurement.
 	SkipUnparsable bool
+	// Baseline, when measuring against one, is the Baseline's measurement:
+	// a clone location already there is its group's original.
+	Baseline *Report
 }
 
 // Measure analyses files, splitting production code from tests.
 func Measure(files []SourceFile, opts Options) (Report, error) {
-	r := Report{SchemaVersion: schemaVersion, SkippedAtBaseline: []string{}}
+	r := Report{SchemaVersion: schemaVersion, SkippedAtBaseline: []string{}, shapes: map[string]map[uint64]bool{}}
 	var production, tests []analysedFile
 	for _, f := range files {
 		a, err := analyse(f, opts.DuplicateMinLines)
@@ -128,14 +133,22 @@ func Measure(files []SourceFile, opts Options) (Report, error) {
 		if err != nil {
 			return Report{}, fmt.Errorf("%s: %w", f.Path, err)
 		}
+		r.shapes[f.Path] = map[uint64]bool{}
+		for _, fr := range a.fragments {
+			r.shapes[f.Path][fr.Shape] = true
+		}
 		if f.Test {
 			tests = append(tests, a)
 		} else {
 			production = append(production, a)
 		}
 	}
-	r.Group = measureGroup(production, opts.Weights)
-	r.Tests = measureGroup(tests, opts.Weights)
+	var existed duplication.Existed
+	if b := opts.Baseline; b != nil {
+		existed = func(path string, shape uint64) bool { return b.shapes[path][shape] }
+	}
+	r.Group = measureGroup(production, opts.Weights, existed)
+	r.Tests = measureGroup(tests, opts.Weights, existed)
 	return r, nil
 }
 
@@ -161,12 +174,12 @@ func analyse(f SourceFile, duplicateMinLines int) (analysedFile, error) {
 
 // measureGroup returns the Units of files: functions, then classes, then
 // files, then Modules, then the repository. Clones are sought within the group.
-func measureGroup(analysed []analysedFile, weights map[Signal]float64) Group {
+func measureGroup(analysed []analysedFile, weights map[Signal]float64, existed duplication.Existed) Group {
 	fragments := map[string][]analysis.Fragment{}
 	for _, f := range analysed {
 		fragments[f.Path] = f.fragments
 	}
-	clones := duplication.Find(fragments)
+	clones := duplication.Find(fragments, existed)
 	cloned := clonedLines(clones)
 
 	var functions, classes, fileUnits []Unit
@@ -250,11 +263,15 @@ func (f analysedFile) duplicated(cloned map[int]bool, start, end int) int {
 	return n
 }
 
-// clonedLines returns, per file path, the lines lying in any clone.
+// clonedLines returns, per file path, the lines lying in an additional copy:
+// the original of each clone group is not duplication.
 func clonedLines(groups []duplication.CloneGroup) map[string]map[int]bool {
 	cloned := map[string]map[int]bool{}
 	for _, g := range groups {
 		for _, l := range g.Locations {
+			if l.Original {
+				continue
+			}
 			if cloned[l.Path] == nil {
 				cloned[l.Path] = map[int]bool{}
 			}
