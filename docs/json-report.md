@@ -78,4 +78,4 @@ Severity order: by `kind` (function, class, file, module, repository); within a 
 | Entropy Score | `entropyScore` | `entropy_score` | 10 | Entropy Score Delta |
 | Scatter | `scatter` | `scatter` | 0 | `modules − budget` |
 
-Signal weights in `entropic.toml`'s `[weights]` use the Signal names `complexity` (default 1) and `duplication` (default 0.1).
+Signal weights in `entropic.toml`'s `[weights]` use the Signal names `complexity` (default 1) and `duplication` (default 0.5).

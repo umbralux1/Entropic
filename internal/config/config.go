@@ -38,7 +38,7 @@ type Config struct {
 }
 
 // Default is the configuration used when there is no config file. Values
-// are provisional until tuned on real repositories.
+// are calibrated in docs/calibration.md.
 func Default() Config {
 	thresholds := map[string]float64{}
 	for _, t := range signal.Thresholds {

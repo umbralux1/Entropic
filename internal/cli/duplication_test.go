@@ -95,7 +95,7 @@ func TestCloneGroupListsEveryLocation(t *testing.T) {
 }
 
 func TestDuplicateInUncommittedEditShowsPositiveDuplicationDelta(t *testing.T) {
-	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc").
+	repo := testrepo.New(t).Write("entropic.toml", roomyEntropyScore).Write("calc/calc.go", calcGo).Commit("add calc").
 		Write("stats/stats.go", countAbove)
 
 	r := repo.Run("--format", "json").Report(0)
@@ -147,7 +147,7 @@ func Tally(xs []int) (int, int) {
 func TestCopyingAFunctionCountsOnlyTheCopy(t *testing.T) {
 	// The copy sorts before the original, which still keeps that role
 	// because only the original was there at the Baseline.
-	repo := testrepo.New(t).Write("z/z.go", twelveLines).Commit("add z").
+	repo := testrepo.New(t).Write("entropic.toml", roomyEntropyScore).Write("z/z.go", twelveLines).Commit("add z").
 		// A trailing constant keeps the whole file from being one clone.
 		Write("a/a.go", "package a"+twelveLines[len("package z"):]+"\nconst A = 1\n")
 

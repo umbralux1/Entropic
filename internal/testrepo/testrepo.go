@@ -270,11 +270,12 @@ func (r *Repo) Run(args ...string) Result {
 // as a JSON report.
 func (res Result) Report(want int) Report {
 	res.t.Helper()
-	if res.Code != want {
-		res.t.Fatalf("exit code: want %d, got %d; stderr: %s", want, res.Code, res.Stderr)
-	}
 	var rep Report
-	if err := json.Unmarshal([]byte(res.Stdout), &rep); err != nil {
+	err := json.Unmarshal([]byte(res.Stdout), &rep)
+	if res.Code != want {
+		res.t.Fatalf("exit code: want %d, got %d; violations: %+v; stderr: %s", want, res.Code, rep.Violations, res.Stderr)
+	}
+	if err != nil {
 		res.t.Fatalf("stdout is not a JSON report: %v\n%s", err, res.Stdout)
 	}
 	return rep

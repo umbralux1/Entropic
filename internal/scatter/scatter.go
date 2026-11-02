@@ -66,8 +66,8 @@ func Measure(changes []Change) Scatter {
 	return s
 }
 
-// budget is the provisional Scatter Budget: one Module, plus one more each
-// time the change roughly doubles past 10 lines. To be tuned on real history.
+// budget is the Scatter Budget: one Module, plus one more each time the
+// change roughly doubles past 10 lines. Calibrated in docs/calibration.md.
 func budget(changedLines int) float64 {
 	return 1 + math.Log2(1+float64(changedLines)/10)
 }

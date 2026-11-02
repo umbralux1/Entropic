@@ -149,6 +149,12 @@ func CountPositive(grid [][]int) int {
 	}
 }
 
+// roomyEntropyScore lifts the entropy_score threshold out of the way. The
+// fixtures are a few lines long, so any change swings the Entropy Score, a
+// density per 100 lines, past its default limit; tests about something else
+// set it.
+const roomyEntropyScore = "[thresholds]\nentropy_score = 100\n"
+
 const calcGo = `package calc
 
 func Sign(x int) int {

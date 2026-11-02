@@ -40,7 +40,7 @@ func TestTextListsFunctionsBeforeTheirClasses(t *testing.T) {
 }
 
 func TestTextListsUnitsWithLargestDeltaFirst(t *testing.T) {
-	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc").
+	repo := testrepo.New(t).Write("entropic.toml", roomyEntropyScore).Write("calc/calc.go", calcGo).Commit("add calc").
 		Write("calc/calc.go", signNested). // Sign: Complexity 1 -> 3, Delta +2
 		Write("calc/grid.go", `package calc
 
@@ -75,8 +75,8 @@ func Grid(rows [][]int) {
 var flat = "\nfunc Flat() {\n" + strings.Repeat("\tx := 1\n", 10) + "}\n"
 
 func TestUnitsAreOrderedByWeightedDeltaInJSONAndText(t *testing.T) {
-	repo := testrepo.New(t).Write("z/z.go", "package z\n"+flat).Commit("add z").
-		// A copy of Flat: Duplication +12, weighing 12 x 0.1 = 1.2.
+	repo := testrepo.New(t).Write("entropic.toml", roomyEntropyScore).Write("z/z.go", "package z\n"+flat).Commit("add z").
+		// A copy of Flat: Duplication +12, weighing 12 x 0.5 = 6.
 		Write("c/c.go", "package c\n"+flat+"\nconst C = 1\n").
 		// Grid: Complexity +1, weighing 1.
 		Write("a/grid.go", "package a\n\nfunc Grid(rows [][]int) {\n\tfor range rows {\n\t}\n}\n")
@@ -105,6 +105,7 @@ func TestUnitsAreOrderedByWeightedDeltaInJSONAndText(t *testing.T) {
 
 func TestTextShowsCloneGroupsHotspotsAndScatterDetail(t *testing.T) {
 	repo := testrepo.New(t).
+		Write("entropic.toml", roomyEntropyScore).
 		Write("calc/calc.go", calcGo).
 		CommitDaysAgo(10, "add calc").
 		Write("stats/stats.go", countAbove)

@@ -21,10 +21,10 @@ const (
 var OfCode = []Signal{Complexity, Duplication}
 
 // DefaultWeights weigh each Signal of code in the Entropy Score. Values are
-// provisional until tuned on real repositories.
+// calibrated in docs/calibration.md.
 func DefaultWeights() map[Signal]float64 {
-	// A duplicated line weighs a tenth of a Complexity point.
-	return map[Signal]float64{Complexity: 1, Duplication: 0.1}
+	// A duplicated line weighs half a Complexity point.
+	return map[Signal]float64{Complexity: 1, Duplication: 0.5}
 }
 
 // Threshold bounds how much a change may raise one figure; exceeding it is
@@ -34,22 +34,22 @@ type Threshold struct {
 	Name string
 	// Key is its key in entropic.toml's [thresholds] table: snake_case.
 	Key string
-	// DefaultLimit applies when entropic.toml sets none. Provisional until
-	// tuned on real repositories.
+	// DefaultLimit applies when entropic.toml sets none. Calibrated in
+	// docs/calibration.md.
 	DefaultLimit float64
 }
 
 // The thresholds Entropic checks.
 var (
 	// ComplexityThreshold is the most Complexity any one function may gain.
-	ComplexityThreshold = Threshold{Name: "complexity", Key: "complexity", DefaultLimit: 10}
+	ComplexityThreshold = Threshold{Name: "complexity", Key: "complexity", DefaultLimit: 15}
 	// DuplicationThreshold is the most duplicated lines any one file may gain.
 	DuplicationThreshold = Threshold{Name: "duplication", Key: "duplication", DefaultLimit: 20}
 	// EntropyScoreThreshold is the most the Entropy Score may rise.
-	EntropyScoreThreshold = Threshold{Name: "entropyScore", Key: "entropy_score", DefaultLimit: 10}
+	EntropyScoreThreshold = Threshold{Name: "entropyScore", Key: "entropy_score", DefaultLimit: 3}
 	// ScatterThreshold is how many Modules a change may touch beyond its
 	// Scatter Budget.
-	ScatterThreshold = Threshold{Name: "scatter", Key: "scatter", DefaultLimit: 0}
+	ScatterThreshold = Threshold{Name: "scatter", Key: "scatter", DefaultLimit: 1}
 )
 
 // Thresholds lists every threshold, in the order violations are reported.
