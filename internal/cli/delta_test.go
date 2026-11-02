@@ -34,7 +34,7 @@ func SumPositive(xs []int) int {
 `
 
 func TestDefaultBaseForUncommittedEditIsHEAD(t *testing.T) {
-	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc")
+	repo := testrepo.New(t).Write("entropic.toml", roomyEntropyScore).Write("calc/calc.go", calcGo).Commit("add calc")
 	head := repo.Rev("HEAD")
 	repo.Write("calc/calc.go", signNested)
 
@@ -49,7 +49,7 @@ func TestDefaultBaseForUncommittedEditIsHEAD(t *testing.T) {
 }
 
 func TestDefaultBaseForCleanBranchIsMergeBaseWithMain(t *testing.T) {
-	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc")
+	repo := testrepo.New(t).Write("entropic.toml", roomyEntropyScore).Write("calc/calc.go", calcGo).Commit("add calc")
 	forkPoint := repo.Rev("HEAD")
 	repo.Branch("feature").Write("calc/calc.go", signNested).Commit("nest Sign")
 	repo.Switch("main").Write("calc/grid.go", `package calc
@@ -136,7 +136,7 @@ func TestSnapshotHasNoBaselineOrDelta(t *testing.T) {
 }
 
 func TestExplicitBaseReportsDeltaPerUnit(t *testing.T) {
-	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc")
+	repo := testrepo.New(t).Write("entropic.toml", roomyEntropyScore).Write("calc/calc.go", calcGo).Commit("add calc")
 	head := repo.Rev("HEAD")
 	repo.Write("calc/calc.go", signNested)
 
@@ -159,7 +159,7 @@ func TestExplicitBaseReportsDeltaPerUnit(t *testing.T) {
 }
 
 func TestEntropyScoreAndSignalsCarryDelta(t *testing.T) {
-	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc").Write("calc/calc.go", signNested)
+	repo := testrepo.New(t).Write("entropic.toml", roomyEntropyScore).Write("calc/calc.go", calcGo).Commit("add calc").Write("calc/calc.go", signNested)
 
 	r := repo.Run("--base", "HEAD", "--format", "json").Report(0)
 
@@ -187,7 +187,7 @@ func TestMeasuringABaselineLeavesTheWorkingTreeUntouched(t *testing.T) {
 }
 
 func TestDefaultBaseInCICheckoutUsesOriginMain(t *testing.T) {
-	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc")
+	repo := testrepo.New(t).Write("entropic.toml", roomyEntropyScore).Write("calc/calc.go", calcGo).Commit("add calc")
 	forkPoint := repo.Rev("HEAD")
 	repo.Branch("feature").Write("calc/calc.go", signNested).Commit("nest Sign")
 	ci := repo.CICheckout("feature")

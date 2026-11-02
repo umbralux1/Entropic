@@ -119,10 +119,10 @@ func TestScatterOverBudgetIsAViolationNamingTheModulesTouched(t *testing.T) {
 	r := repo.Run().Report(1)
 
 	// 4 Modules for 8 changed lines; budget 1 + log2(1.8) = 1.848, so 2.152
-	// Modules over it against a default allowance of 0.
+	// Modules over it against a default allowance of 1.
 	v := r.Violation(t, "scatter")
-	if v.Limit != 0 || math.Abs(v.Value-(4-1.8479969065549504)) > 1e-9 {
-		t.Errorf("scatter violation: want 2.152 Modules over budget, limit 0; got %+v", v)
+	if v.Limit != 1 || math.Abs(v.Value-(4-1.8479969065549504)) > 1e-9 {
+		t.Errorf("scatter violation: want 2.152 Modules over budget, limit 1; got %+v", v)
 	}
 	var names []string
 	for _, u := range v.Units {
@@ -181,9 +181,9 @@ func TestSettingOneThresholdKeepsTheOthersDefaults(t *testing.T) {
 
 	r := repo.Run().Report(1)
 
-	// The Entropy Score rises by 31.52 (as above), over its default limit of 10.
-	if v := r.Violation(t, "entropyScore"); v.Limit != 10 {
-		t.Errorf("entropyScore violation: want the default limit 10, got %+v", v)
+	// The Entropy Score rises by 31.52 (as above), over its default limit of 3.
+	if v := r.Violation(t, "entropyScore"); v.Limit != 3 {
+		t.Errorf("entropyScore violation: want the default limit 3, got %+v", v)
 	}
 }
 

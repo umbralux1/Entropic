@@ -52,7 +52,7 @@ func TestExcludeAppliesToBaselineToo(t *testing.T) {
 	repo := testrepo.New(t).
 		Write("calc/calc.go", calcGo).
 		Write("migrations/m.go", flatGo).
-		Write("entropic.toml", "exclude = [\"migrations\"]\n").
+		Write("entropic.toml", "exclude = [\"migrations\"]\n"+roomyEntropyScore).
 		Commit("add code and config")
 	repo.Write("calc/calc.go", signNested)
 

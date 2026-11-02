@@ -9,7 +9,7 @@ import (
 )
 
 func TestChangeConfinedToOneModuleHasScatterOne(t *testing.T) {
-	repo := testrepo.New(t).Write("calc/calc.go", calcGo).Commit("add calc").
+	repo := testrepo.New(t).Write("entropic.toml", roomyEntropyScore).Write("calc/calc.go", calcGo).Commit("add calc").
 		Write("calc/calc.go", signNested) // 3 lines added, all in Module calc
 
 	r := repo.Run("--format", "json").Report(0)
@@ -22,8 +22,9 @@ func TestChangeConfinedToOneModuleHasScatterOne(t *testing.T) {
 	}
 }
 
-// Provisional Scatter Budget: 1 + log2(1 + changed lines / 10), so a change
-// of 10 lines may touch 2 Modules, 30 lines 3, 70 lines 4, 150 lines 5.
+// Scatter Budget: 1 + log2(1 + changed lines / 10), so a change of 10 lines
+// may touch 2 Modules, 30 lines 3, 70 lines 4, 150 lines 5. By default a
+// change is a violation only when more than 1 Module over its budget.
 
 func TestSmallChangeAcrossManyModulesExceedsScatterBudget(t *testing.T) {
 	repo := testrepo.New(t)
@@ -35,7 +36,7 @@ func TestSmallChangeAcrossManyModulesExceedsScatterBudget(t *testing.T) {
 		repo.Write(m+"/f.go", "package "+m+"\n\nfunc G() {}\n") // 1 line deleted, 1 added
 	}
 
-	r := repo.Run("--format", "json").Report(1) // over budget: a violation
+	r := repo.Run("--format", "json").Report(1) // 2.15 Modules over budget: a violation
 
 	// 4 Modules, 8 changed lines: budget 1 + log2(1.8) = 1.8479...
 	if s := r.Scatter; s == nil || s.Modules != 4 || s.ChangedLines != 8 ||
@@ -54,7 +55,7 @@ func TestScatterReportsFilesTouchedAndShannonEntropyAsInformational(t *testing.T
 		Write("a/y.go", "package a\n\nfunc Y2() {}\n\nfunc W2() {}\n"). // 4 changed lines
 		Write("b/z.go", "package b\n\nfunc Z2() {}\n")                  // 2 changed lines
 
-	r := repo.Run("--format", "json").Report(1) // 2 Modules over a budget of 1.85
+	r := repo.Run("--format", "json").Report(0) // 2 Modules over a budget of 1.85, within the allowance
 
 	// Changed lines per Module: a 6, b 2 of 8, so p = 3/4, 1/4.
 	// H = -(3/4 log2 3/4 + 1/4 log2 1/4) = 0.8113 bits; 2^H = 1.7548 Modules.
@@ -87,7 +88,7 @@ func TestScatterEdgeStates(t *testing.T) {
 		modules      int
 		changedLines int
 		files        int
-		exit         int // 1 when over the Scatter Budget
+		overBudget   bool
 	}{
 		{
 			name:   "no change touches no Module",
@@ -103,7 +104,7 @@ func TestScatterEdgeStates(t *testing.T) {
 			change: func(r *testrepo.Repo) {
 				r.Remove("a/f.go").Write("c/f.go", f) // 3 deleted in a, 3 added in c
 			},
-			modules: 2, changedLines: 6, files: 2, exit: 1, // budget 1.68
+			modules: 2, changedLines: 6, files: 2, overBudget: true, // budget 1.68
 		},
 		{
 			name: "root Module counts like any other",
@@ -112,7 +113,7 @@ func TestScatterEdgeStates(t *testing.T) {
 				r.Write("main.go", "package main\n\nfunc main() { _ = 1 }\n").
 					Write("a/f.go", "package p\n\nfunc G() {}\n")
 			},
-			modules: 2, changedLines: 4, files: 2, exit: 1, // budget 1.49
+			modules: 2, changedLines: 4, files: 2, overBudget: true, // budget 1.49
 		},
 		{
 			name:   "non-source files are not part of Scatter",
@@ -128,12 +129,13 @@ func TestScatterEdgeStates(t *testing.T) {
 				Commit("start")
 			c.change(repo)
 
-			r := repo.Run("--base", "HEAD", "--format", "json").Report(c.exit)
+			r := repo.Run("--base", "HEAD", "--format", "json").Report(0) // within the allowance of 1
 
 			s := r.Scatter
-			if s == nil || s.Modules != c.modules || s.ChangedLines != c.changedLines || s.Informational.Files != c.files {
-				t.Errorf("Scatter: want %d Modules, %d changed lines, %d files; got %+v",
-					c.modules, c.changedLines, c.files, s)
+			if s == nil || s.Modules != c.modules || s.ChangedLines != c.changedLines || s.Informational.Files != c.files ||
+				s.OverBudget != c.overBudget {
+				t.Errorf("Scatter: want %d Modules, %d changed lines, %d files, over budget %v; got %+v",
+					c.modules, c.changedLines, c.files, c.overBudget, s)
 			}
 		})
 	}
@@ -141,7 +143,7 @@ func TestScatterEdgeStates(t *testing.T) {
 
 func TestScatterLeavesOutExcludedVendoredAndGeneratedFiles(t *testing.T) {
 	repo := testrepo.New(t).
-		Write("entropic.toml", "exclude = [\"migrations\"]\n").
+		Write("entropic.toml", "exclude = [\"migrations\"]\n"+roomyEntropyScore).
 		Write("calc/calc.go", calcGo).
 		Commit("start").
 		Write("calc/calc.go", signNested). // 3 lines added in calc: the only counted change
@@ -177,7 +179,7 @@ func TestScatterOfCommittedRenameAgainstExplicitBase(t *testing.T) {
 	start := repo.Rev("HEAD")
 	repo.Remove("a/f.go").Write("b/f.go", "package a\n\nfunc F() {}\n").Commit("move f to b")
 
-	r := repo.Run("--base", start, "--format", "json").Report(1) // over a budget of 1.68
+	r := repo.Run("--base", start, "--format", "json").Report(0) // 0.32 over a budget of 1.68, within the allowance
 
 	// Deleted from a (3 lines) and added to b (3 lines).
 	if s := r.Scatter; s == nil || s.Modules != 2 || s.ChangedLines != 6 {
@@ -192,7 +194,8 @@ func bigFunc(pkg string) string {
 }
 
 func TestLargeChangeAcrossFewModulesStaysWithinScatterBudget(t *testing.T) {
-	repo := testrepo.New(t).Write("main.go", "package main\n\nfunc main() {}\n").Commit("start").
+	repo := testrepo.New(t).Write("entropic.toml", roomyEntropyScore).
+		Write("main.go", "package main\n\nfunc main() {}\n").Commit("start").
 		Write("a/big.go", bigFunc("a")).
 		Write("b/big.go", bigFunc("b")).
 		Write("c/big.go", bigFunc("c")) // new, untracked files: 3 x 60 added lines
